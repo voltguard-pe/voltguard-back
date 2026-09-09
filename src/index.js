@@ -30,20 +30,38 @@ connectDB();
 app.use(express.json());
 app.use(cookieParser());
 
-const allowlist = [process.env.FRONTEND_URL];
+// const allowlist = [process.env.FRONTEND_URL];
+
+// const corsOptions = {
+//     origin: function (origin, callback) {
+//         if (allowlist.indexOf(origin) !== -1 || !origin) {
+//             callback(null, true);
+//         } else {
+//             callback(new Error("Not allowed by CORS"));
+//         }
+//     },
+//     credentials: true
+// };
+
+// app.use(cors(corsOptions));
+
+const allowlist = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim().replace(/\/$/, "")) : [];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        if (allowlist.indexOf(origin) !== -1 || !origin) {
+        if (!origin || allowlist.includes(origin)) {
             callback(null, true);
         } else {
             callback(new Error("Not allowed by CORS"));
         }
     },
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions))
 
 app.use("/api/v1/auth", authRoute);
 app.use("/api/v1/company", companyRoute);
@@ -65,5 +83,5 @@ app.use("/api/v1/voltage-events", voltageEventRoute);
 const PORT = process.env.PORT || 5080;
 
 app.listen(PORT, () => {
-  console.log("Se esta ejecutando en el puerto:", PORT);
+    console.log("Se esta ejecutando en el puerto:", PORT);
 });
