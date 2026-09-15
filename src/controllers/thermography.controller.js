@@ -14,23 +14,30 @@ export const uploadThermographyPackage = async (req, res) => {
     const files = req.files || {};
 
     const csvFile = files["csvFile"]?.[0];
-    const imageFile = files["imageFile"]?.[0];
+    const thermalImageFile = files["thermalImage"]?.[0];
+    const visualImageFile = files["visualImage"]?.[0];
 
     if (!csvFile || !csvFile.buffer) {
-      return res.status(400).json({ error: "El archivo CSV de la matriz térmica es obligatorio." });
+      return res.status(400).json({ error: "El archivo CSV de la matriz es obligatorio." });
     }
 
-    // 1. Procesar la imagen si fue adjuntada
-    let originalImageUrl = req.body.originalImageUrl || null;
-    if (imageFile && imageFile.buffer) {
-      const mime = imageFile.mimetype || "image/jpeg";
-      originalImageUrl = `data:${mime};base64,${imageFile.buffer.toString("base64")}`;
+    // 1. Convertir imágenes a Base64 (Data URLs)
+    let thermalImageUrl = null;
+    if (thermalImageFile?.buffer) {
+      const mime = thermalImageFile.mimetype || "image/jpeg";
+      thermalImageUrl = `data:${mime};base64,${thermalImageFile.buffer.toString("base64")}`;
     }
 
-    // 2. Parsear el CSV térmico
+    let originalImageUrl = null;
+    if (visualImageFile?.buffer) {
+      const mime = visualImageFile.mimetype || "image/jpeg";
+      originalImageUrl = `data:${mime};base64,${visualImageFile.buffer.toString("base64")}`;
+    }
+
+    // 2. Procesar CSV Radiométrico
     let csvText = csvFile.buffer.toString("utf-8");
-    if (csvText.includes("ï»¿")) {
-      csvText = csvText.replace("ï»¿", "");
+    if (csvText.includes("\ufeff")) {
+      csvText = csvText.replace("\ufeff", "");
     }
 
     const lines = csvText.trim().split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -69,7 +76,7 @@ export const uploadThermographyPackage = async (req, res) => {
     const deltaT = max - min;
     const severity = calculateSeverity(deltaT);
 
-    // 3. Comprimir matriz térmica
+    // 3. Comprimir matriz térmica en binario ligero
     const rawBuffer = Buffer.from(floatArray.buffer);
     const compressedData = zlib.deflateSync(rawBuffer);
 
@@ -79,6 +86,7 @@ export const uploadThermographyPackage = async (req, res) => {
       boardId,
       rows,
       cols,
+      thermalImageUrl: thermalImageUrl || record?.thermalImageUrl || null,
       originalImageUrl: originalImageUrl || record?.originalImageUrl || null,
       stats: {
         min: Number(min.toFixed(2)),
@@ -100,12 +108,13 @@ export const uploadThermographyPackage = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Inspección termográfica guardada correctamente.",
+      message: "Inspección guardada correctamente.",
       data: {
         id: record._id,
         rows: record.rows,
         cols: record.cols,
         stats: record.stats,
+        thermalImageUrl: record.thermalImageUrl,
         originalImageUrl: record.originalImageUrl,
       },
     });

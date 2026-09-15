@@ -4,19 +4,18 @@ import { v2 as cloudinary } from "cloudinary";
 // Helper para subir archivos a Cloudinary como RAW (Documentos estandar)
 const uploadFromBuffer = (fileBuffer, companyPublicCode, originalName) => {
     return new Promise((resolve, reject) => {
-        // Aseguramos un public_id limpio sin la extensión duplicada
         const cleanName = originalName.toLowerCase().endsWith('.pdf') 
             ? originalName.replace(/\.pdf$/i, '') 
             : originalName;
 
-        // Sanitizamos el nombre eliminando caracteres especiales
         const safePublicId = cleanName.replace(/[^a-zA-Z0-9_-]/g, "_");
 
         const stream = cloudinary.uploader.upload_stream(
             {
                 folder: `boards/documentos/${companyPublicCode}`,
-                resource_type: "auto", // 👈 "raw" es la forma correcta para PDFs completos
-                public_id: `${safePublicId}`, // 👈 Forzamos la extensión en el public_id
+                resource_type: "image", // "image" permite previsualización nativa de PDFs en Cloudinary
+                format: "pdf",          // Garantiza Content-Type: application/pdf
+                public_id: safePublicId,
             },
             (error, result) => {
                 if (result) resolve(result);
@@ -120,13 +119,10 @@ export const deleteDocument = async (req, res) => {
             return res.status(404).json({ message: "Documento no encontrado" });
         }
 
-        // Eliminar físicamente de Cloudinary especificando resource_type: "raw"
         await cloudinary.uploader.destroy(document.cloudinaryPublicId, { resource_type: "image" });
-
-        // Eliminar de la base de datos
         await Document.findByIdAndDelete(id);
 
-        return res.status(200).json({ message: "Documento eliminado correctamente tanto de la BD como de Cloudinary" });
+        return res.status(200).json({ message: "Documento eliminado correctamente" });
     } catch (error) {
         return res.status(500).json({ message: "Error al eliminar el documento", error: error.message });
     }

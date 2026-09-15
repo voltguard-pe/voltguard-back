@@ -21,7 +21,8 @@ router.post(
   "/:boardId/upload",
   upload.fields([
     { name: "csvFile", maxCount: 1 },
-    { name: "imageFile", maxCount: 1 },
+    { name: "thermalImage", maxCount: 1 },
+    { name: "visualImage", maxCount: 1 },
   ]),
   uploadThermographyPackage
 );

@@ -12,6 +12,12 @@ const ThermographySchema = new mongoose.Schema(
       type: String,
       default: "Inspección Termográfica Radiométrica (NFPA 70B)",
     },
+    // Imagen Térmica FLIR nativa (.jpg)
+    thermalImageUrl: {
+      type: String,
+      default: null,
+    },
+    // Fotografía visual del tablero (.jpg)
     originalImageUrl: {
       type: String, // URL o ruta de la foto visible (.jpg)
       default: null,
