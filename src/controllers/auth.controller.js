@@ -8,6 +8,18 @@ import {
 } from "../services/email.service.js";
 import axios from "axios";
 
+const getCookieOptions = () => {
+    const isProduction = process.env.NODE_ENV === "production";
+    
+    return {
+        httpOnly: true,
+        secure: isProduction, // En localhost puede ser false, en producción obligatoriamente true
+        sameSite: isProduction ? "none" : "lax", // "none" exige HTTPS en producción
+        domain: process.env.COOKIE_DOMAIN || undefined, // Toma la variable o deja undefined si no existe
+        path: "/",
+    };
+};
+
 export const register = async (req, res) => {
     try {
         const {
@@ -157,12 +169,7 @@ export const login = async (req, res) => {
 
         const token = generateToken(user);
 
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "none",
-            path: "/",
-        });
+       res.cookie("token", token, getCookieOptions());
 
         res.status(200).json({
             message: "Login exitoso",
@@ -207,12 +214,7 @@ export const registerSuperAdmin = async (req, res) => {
 };
 
 export const logout = (req, res) => {
-    res.clearCookie("token", {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-        path: "/",
-    });
+    res.clearCookie("token", getCookieOptions());
     res.status(200).json({ message: "Sesión cerrada" });
 };
 
