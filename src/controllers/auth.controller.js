@@ -181,6 +181,7 @@ export const login = async (req, res) => {
 
         res.status(200).json({
             message: "Login exitoso",
+            token, // <-- Agregamos esta línea para que el frontend pueda guardarlo
             user: {
                 id: user._id,
                 firstname: user.firstname,

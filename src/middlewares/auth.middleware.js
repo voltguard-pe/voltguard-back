@@ -3,7 +3,22 @@ import jwt from "jsonwebtoken";
 
 export const authMiddleware = async (req, res, next) => {
     try {
-        const token = req.cookies.token;
+        // const token = req.cookies.token;
+
+        let token;
+
+        // 1. Prioridad: Buscar token en la cabecera "Authorization: Bearer <token>"
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.split(" ")[1];
+        }
+
+        // 2. Segunda opción: Si no está en el header, buscar en las cookies (por si acaso)
+        if (!token && req.cookies) {
+            token = req.cookies.token;
+        }
+
+        
 
         if (!token) {
             return res.status(401).json({ message: "No autorizado" });
@@ -11,16 +26,12 @@ export const authMiddleware = async (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // 🔥 buscar usuario en BD
-        // const user = await User.findById(decoded.id).populate("company", "name publicCode").select("-password");
         const user = await User.findById(decoded.id).select("-password");
-        // console.log(user)
 
         if (!user) {
             return res.status(401).json({ message: "Usuario no existe" });
         }
 
-        // 🔥 ahora req.user tiene TODO
         req.user = user;
 
         next();
