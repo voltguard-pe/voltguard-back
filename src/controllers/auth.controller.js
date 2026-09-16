@@ -14,7 +14,8 @@ const getCookieOptions = () => {
     return {
         httpOnly: true,
         secure: isProduction, // En localhost puede ser false, en producción obligatoriamente true
-        sameSite: isProduction ? "none" : "lax", // "none" exige HTTPS en producción
+        // sameSite: isProduction ? "none" : "lax", // "none" exige HTTPS en producción
+        sameSite:"none", // "none" exige HTTPS en producción
         domain: isProduction ? ".voltguard.pe" : undefined, // Toma la variable o deja undefined si no existe
         path: "/",
     };
