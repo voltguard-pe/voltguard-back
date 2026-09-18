@@ -24,7 +24,7 @@ const getMimeTypeFromFileName = (filename) => {
         ".png": "image/png",
         ".webp": "image/webp",
     };
-    return mimeTypes[ext] || null;
+    return mimeTypes[ext] || "image/jpeg";
 };
 
 const getImageKindFromFileName = (filename) => {
@@ -42,7 +42,7 @@ const getBoardCodeFromFileName = (filename) => {
     // path.basename asegura que se tome únicamente "REC-MOL-TE-003_unifilar.png" ignorando subcarpetas
     const baseName = path.basename(filename);
     const nameWithoutExt = path.parse(baseName).name;
-    
+
     // Extrae todo lo que esté antes del tipo (_unifilar, _itm, _termografia, _normal)
     return nameWithoutExt.split("_")[0].trim().toUpperCase();
 };
@@ -450,7 +450,7 @@ export const importBoardsWithNfpaFromZip = async (req, res) => {
             // Obtener el nombre limpio del archivo sin la subcarpeta
             const normalizedPath = entry.entryName.replace(/\\/g, "/");
             const originalName = normalizedPath.split("/").pop(); // Ej: "REC-MOL-TE-003_itm.jpg"
-            
+
             const boardCode = getBoardCodeFromFileName(originalName);
             const kind = getImageKindFromFileName(originalName);
 
@@ -464,11 +464,21 @@ export const importBoardsWithNfpaFromZip = async (req, res) => {
                 };
             }
 
+            const fileBuffer = entry.getData();
+
+            // Validar que el archivo realmente tenga datos
+            if (!fileBuffer || fileBuffer.length === 0) {
+                console.warn(`⚠️ Archivo vacío detectado y omitido: ${originalName}`);
+                continue;
+            }
+
+            const mime = getMimeTypeFromFileName(originalName);
+
             const imageData = {
                 entry,
                 originalName,
-                buffer: entry.getData(),
-                mimetype: getMimeTypeFromFileName(originalName),
+                buffer: fileBuffer,
+                mimetype: mime,
                 kind,
             };
 
@@ -516,12 +526,24 @@ export const importBoardsWithNfpaFromZip = async (req, res) => {
 
                 const allWarnings = [];
 
-                // 1. Análisis del diagrama unifilar con OpenAI
-                const aiUnifilarResult = await analyzeUnifilarWithOpenAI({
-                    buffer: group.unifilar.buffer,
-                    mimetype: group.unifilar.mimetype,
-                    boardCode,
-                });
+                // 1. Análisis del diagrama unifilar con OpenAI (Con captura detallada de error)
+                let aiUnifilarResult;
+                try {
+                    aiUnifilarResult = await analyzeUnifilarWithOpenAI({
+                        buffer: group.unifilar.buffer,
+                        mimetype: group.unifilar.mimetype,
+                        boardCode,
+                    });
+                } catch (aiErr) {
+                    const fileName = group.unifilar.originalName;
+                    if (aiErr.message?.includes("does not represent a valid image") || aiErr.status === 400) {
+                        throw new Error(
+                            `La imagen unifilar "${fileName}" no es válida para OpenAI (puede estar dañada, corrupta o con extensión incorrecta).`,
+                            { cause: aiErr }
+                        );
+                    }
+                    throw new Error(`Fallo en OpenAI al analizar unifilar "${fileName}": ${aiErr.message}`, { cause: aiErr });
+                }
 
                 if (aiUnifilarResult.warnings?.length) {
                     allWarnings.push(...aiUnifilarResult.warnings);
@@ -539,8 +561,9 @@ export const importBoardsWithNfpaFromZip = async (req, res) => {
                             allWarnings.push(...aiItmResult.warnings);
                         }
                     } catch (itmError) {
-                        console.error(`⚠️ No se pudo procesar la etiqueta NFPA para [${boardCode}]:`, itmError.message);
-                        allWarnings.push(`No se pudo procesar la etiqueta NFPA: ${itmError.message}`);
+                        const itmNames = group.itm.map((i) => i.originalName).join(", ");
+                        console.error(`⚠️ No se pudo procesar la foto ITM para [${boardCode}]:`, itmError.message);
+                        allWarnings.push(`No se pudo procesar foto de interruptor ITM (${itmNames}): ${itmError.message}`);
                     }
                 }
 
