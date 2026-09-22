@@ -41,6 +41,12 @@ const ThermographySchema = new mongoose.Schema(
       },
     },
 
+    // Campo para la observación concisa
+    observation: {
+      type: String,
+      default: null,
+    },
+
     // Matriz de temperaturas comprimida con zlib (peso liviano < 200KB)
     compressedData: {
       type: Buffer,
