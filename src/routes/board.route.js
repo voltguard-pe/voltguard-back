@@ -8,6 +8,7 @@ import {
   publicGetCompanyBoards,
   updateBoard,
   assignDocumentsToBoard,
+  bulkMoveBoardsToCompany
 } from "../controllers/board.controller.js";
 
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware.js";
@@ -62,5 +63,7 @@ router.put(
   updateBoard
 );
 router.delete("/:publicCode/:code", requireRole("SUPERADMIN"), deleteBoard);
+
+router.post("/bulk-move", bulkMoveBoardsToCompany);
 
 export default router;

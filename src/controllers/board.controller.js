@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 import cloudinary from "../config/cloudinary.js";
 import Measurement from "../models/Measurement.js";
+import Spat from "../models/Spat.js";
 import Thermography from "../models/Thermography.js";
 import VoltageEvent from "../models/VoltageEvent.js";
 import mongoose from "mongoose";
@@ -408,54 +409,6 @@ export const updateBoard = async (req, res) => {
     }
 };
 
-// ✅ Eliminar tablero
-// export const deleteBoard = async (req, res) => {
-//     try {
-//         const { publicCode, code } = req.params;
-
-//         const company = await Company.findOne({ publicCode });
-//         if (!company) {
-//             return res.status(404).json({ message: "Empresa no encontrada" });
-//         }
-
-//         const board = await Board.findOne({
-//             code,
-//             companyPublicCode: publicCode,
-//         });
-
-//         if (!board) {
-//             return res.status(404).json({ message: "Tablero no encontrado" });
-//         }
-
-//         const extractPublicId = (url) => {
-//             const parts = url.split("/");
-//             const file = parts[parts.length - 1];
-//             return `boards/${file.split(".")[0]}`;
-//         };
-
-//         const allImages = [
-//             ...(board.images?.tablero || []),
-//             ...(board.images?.unifilar || []),
-//             ...(board.images?.termografia || []),
-//         ];
-
-//         for (const url of allImages) {
-//             try {
-//                 const publicId = extractPublicId(url);
-//                 await cloudinary.uploader.destroy(publicId);
-//             } catch (err) {}
-//         }
-
-//         await board.deleteOne();
-
-//         return res.json({
-//             message: "Tablero eliminado correctamente",
-//         });
-//     } catch (error) {
-//         return res.status(500).json({ message: error.message });
-//     }
-// };
-
 // ✅ Eliminar tablero y todos sus datos relacionados (Borrado en cascada seguro)
 export const deleteBoard = async (req, res) => {
   try {
@@ -583,6 +536,58 @@ export const deleteBoard = async (req, res) => {
       message: "Error al eliminar el tablero y sus registros asociados",
       error: error.message,
     });
+  }
+};
+
+export const bulkMoveBoardsToCompany = async (req, res) => {
+  try {
+    const { boardCodes, targetCompanyPublicCode } = req.body;
+
+    if (!Array.isArray(boardCodes) || boardCodes.length === 0) {
+      return res.status(400).json({ ok: false, error: "Debes seleccionar al menos un tablero." });
+    }
+
+    if (!targetCompanyPublicCode) {
+      return res.status(400).json({ ok: false, error: "Debes especificar la empresa destino." });
+    }
+
+    // 1. Verificar existencia de la empresa destino
+    const targetCompany = await Company.findOne({ publicCode: targetCompanyPublicCode });
+    if (!targetCompany) {
+      return res.status(404).json({ ok: false, error: "La empresa de destino no existe." });
+    }
+
+    // 2. Obtener los IDs internos (_id) de los tableros a mover
+    const boards = await Board.find({ code: { $in: boardCodes } });
+    if (boards.length === 0) {
+      return res.status(404).json({ ok: false, error: "No se encontraron los tableros especificados." });
+    }
+
+    const previousCompanyCodes = [...new Set(boards.map((b) => b.companyPublicCode))];
+    const boardObjectIds = boards.map((b) => b._id);
+
+    // 3. Trasladar tableros
+    await Board.updateMany(
+      { code: { $in: boardCodes } },
+      { $set: { companyPublicCode: targetCompanyPublicCode } }
+    );
+
+    // 4. Trasladar en cascada los pozos SPAT vinculados
+    await Spat.updateMany(
+      { boardId: { $in: boardObjectIds } },
+      { $set: { companyPublicCode: targetCompanyPublicCode } }
+    );
+
+    return res.status(200).json({
+      ok: true,
+      message: `Se trasladaron ${boards.length} tableros a ${targetCompany.name} correctamente.`,
+      movedCount: boards.length,
+      previousCompanyCodes,
+      targetCompanyPublicCode,
+    });
+  } catch (error) {
+    console.error("Error en bulkMoveBoardsToCompany:", error);
+    return res.status(500).json({ ok: false, error: error.message || "Error al trasladar tableros." });
   }
 };
 
