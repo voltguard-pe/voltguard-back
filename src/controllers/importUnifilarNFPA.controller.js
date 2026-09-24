@@ -95,7 +95,7 @@ const boardUnifilarSchema = {
         incluyeNeutro: { type: ["boolean", "null"] },
         sistema: {
             type: ["string", "null"],
-            enum: ["MONOFASICO", "TRIFASICO", null],
+            enum: ["MONOFÁSICO", "TRIFÁSICO", null],
         },
         circuits: {
             type: "array",
@@ -165,7 +165,7 @@ REGLAS DE INTERPRETACIÓN:
 2. type: "TABLERO GENERAL", "TABLERO DISTRIBUCION", "TABLERO ESTABILIZADO", "TABLERO FUERZA", "TABLERO ALUMBRADO", "TABLERO CONTROL" o "NO_IDENTIFICADO".
 3. tensionNominal: Tensión principal en voltios (ej: 220, 380, 440).
 4. mainBreakerAmperage / mainBreakerSigla: Datos del interruptor general de cabecera.
-5. numeroFases / sistema / neutro: 1Ø -> 1, "MONOFASICO"; 3Ø -> 3, "TRIFASICO". incluyeNeutro: true si aparece N, +N, etc.
+5. numeroFases / sistema / neutro: 1Ø -> 1, "MONOFÁSICO"; 3Ø -> 3, "TRIFÁSICO". incluyeNeutro: true si aparece N, +N, etc.
 6. location: Ubicación física (ej: "SALA ELECTRICA") o null.
 7. circuits: Extraer todos los circuitos visibles con su circuito y descripción.
 8. warnings: Lista de observaciones técnicas o ilegibilidades.`,

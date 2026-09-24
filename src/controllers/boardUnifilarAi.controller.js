@@ -107,7 +107,7 @@ const boardUnifilarSchema = {
         incluyeNeutro: { type: ["boolean", "null"] },
         sistema: {
             type: ["string", "null"],
-            enum: ["MONOFASICO", "TRIFASICO", null],
+            enum: ["MONOFÁSICO", "TRIFÁSICO", null],
         },
         circuits: {
             type: "array",
@@ -183,10 +183,10 @@ Busca el interruptor general (IG) o el interruptor principal que está en la cab
 - Extrae en "mainBreakerSigla" el tipo de tecnología si viene escrita (ej. "MCCB", "ACB", "MCB"). Si no hay datos, usa null.
 
 5. numeroFases / sistema / neutro
-Debes determinar correctamente si el tablero es MONOFASICO o TRIFASICO.
-TABLERO MONOFÁSICO: "1Ø", "1F", "1 fase", "F+N", "L+N", breaker 1P. numeroFases: 1, sistema: "MONOFASICO".
-TABLERO TRIFÁSICO: "3Ø", "3F", "3 fases", "R S T", breaker 3P, tensión 380V, 440V, 480V. numeroFases: 3, sistema: "TRIFASICO".
-REGLA IMPORTANTE SOBRE 220V: 220V NO significa automáticamente TRIFASICO. Si solo aparece una fase + neutro => MONOFASICO.
+Debes determinar correctamente si el tablero es MONOFÁSICO o TRIFÁSICO.
+TABLERO MONOFÁSICO: "1Ø", "1F", "1 fase", "F+N", "L+N", breaker 1P. numeroFases: 1, sistema: "MONOFÁSICO".
+TABLERO TRIFÁSICO: "3Ø", "3F", "3 fases", "R S T", breaker 3P, tensión 380V, 440V, 480V. numeroFases: 3, sistema: "TRIFÁSICO".
+REGLA IMPORTANTE SOBRE 220V: 220V NO significa automáticamente TRIFÁSICO. Si solo aparece una fase + neutro => MONOFÁSICO.
 incluyeNeutro: TRUE si aparece N, +N, (N), F+N, L+N, neutro. Caso contrario FALSE.
 
 6. location

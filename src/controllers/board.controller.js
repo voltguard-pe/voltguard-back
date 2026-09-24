@@ -3,6 +3,10 @@ import Company from "../models/Company.js";
 import { v4 as uuidv4 } from "uuid";
 import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 import cloudinary from "../config/cloudinary.js";
+import Measurement from "../models/Measurement.js";
+import Thermography from "../models/Thermography.js";
+import VoltageEvent from "../models/VoltageEvent.js";
+import mongoose from "mongoose";
 
 /**
  * =========================
@@ -405,51 +409,181 @@ export const updateBoard = async (req, res) => {
 };
 
 // ✅ Eliminar tablero
+// export const deleteBoard = async (req, res) => {
+//     try {
+//         const { publicCode, code } = req.params;
+
+//         const company = await Company.findOne({ publicCode });
+//         if (!company) {
+//             return res.status(404).json({ message: "Empresa no encontrada" });
+//         }
+
+//         const board = await Board.findOne({
+//             code,
+//             companyPublicCode: publicCode,
+//         });
+
+//         if (!board) {
+//             return res.status(404).json({ message: "Tablero no encontrado" });
+//         }
+
+//         const extractPublicId = (url) => {
+//             const parts = url.split("/");
+//             const file = parts[parts.length - 1];
+//             return `boards/${file.split(".")[0]}`;
+//         };
+
+//         const allImages = [
+//             ...(board.images?.tablero || []),
+//             ...(board.images?.unifilar || []),
+//             ...(board.images?.termografia || []),
+//         ];
+
+//         for (const url of allImages) {
+//             try {
+//                 const publicId = extractPublicId(url);
+//                 await cloudinary.uploader.destroy(publicId);
+//             } catch (err) {}
+//         }
+
+//         await board.deleteOne();
+
+//         return res.json({
+//             message: "Tablero eliminado correctamente",
+//         });
+//     } catch (error) {
+//         return res.status(500).json({ message: error.message });
+//     }
+// };
+
+// ✅ Eliminar tablero y todos sus datos relacionados (Borrado en cascada seguro)
 export const deleteBoard = async (req, res) => {
+  try {
+    const { publicCode, code } = req.params;
+
+    const company = await Company.findOne({ publicCode });
+    if (!company) {
+      return res.status(404).json({ message: "Empresa no encontrada" });
+    }
+
+    const board = await Board.findOne({
+      code,
+      companyPublicCode: publicCode,
+    });
+
+    if (!board) {
+      return res.status(404).json({ message: "Tablero no encontrado" });
+    }
+
+    // -------------------------------------------------------------
+    // 1. Filtro seguro de boardId (ObjectId vs String)
+    // -------------------------------------------------------------
+    // Creamos filtros que no fuercen error de casteo en modelos con boardId tipo ObjectId
+    const objectIdFilter = mongoose.Types.ObjectId.isValid(board._id)
+      ? [{ boardId: board._id }]
+      : [];
+
+    const stringOrCodeFilter = [
+      { boardId: String(board._id) },
+      { boardId: board.code },
+    ];
+
+    // Para modelos con schema boardId: ObjectId
+    const strictObjectIdQuery = { $or: objectIdFilter };
+
+    // Para modelos flexibles o indexados como String
+    const flexibleQuery = { $or: [...objectIdFilter, ...stringOrCodeFilter] };
+
+    // -------------------------------------------------------------
+    // 2. Limpieza de imágenes del tablero en Cloudinary
+    // -------------------------------------------------------------
+    const extractPublicId = (url) => {
+      if (!url) return null;
+      const parts = url.split("/");
+      const file = parts[parts.length - 1];
+      return `boards/${file.split(".")[0]}`;
+    };
+
+    const allBoardImages = [
+      ...(board.images?.tablero || []),
+      ...(board.images?.unifilar || []),
+      ...(board.images?.termografia || []),
+    ];
+
+    for (const url of allBoardImages) {
+      try {
+        const publicId = extractPublicId(url);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (err) {
+        console.error("Error al borrar imagen de Cloudinary:", err.message);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 3. Limpieza de imágenes de Termografía en Cloudinary
+    // -------------------------------------------------------------
     try {
-        const { publicCode, code } = req.params;
-
-        const company = await Company.findOne({ publicCode });
-        if (!company) {
-            return res.status(404).json({ message: "Empresa no encontrada" });
-        }
-
-        const board = await Board.findOne({
-            code,
-            companyPublicCode: publicCode,
-        });
-
-        if (!board) {
-            return res.status(404).json({ message: "Tablero no encontrado" });
-        }
-
-        const extractPublicId = (url) => {
+      const thermographyRecords = await Thermography.find(strictObjectIdQuery);
+      for (const thermo of thermographyRecords) {
+        const urlsToClean = [thermo.thermalImageUrl, thermo.originalImageUrl].filter(
+          (url) => url && !url.startsWith("data:")
+        );
+        for (const url of urlsToClean) {
+          try {
             const parts = url.split("/");
             const file = parts[parts.length - 1];
-            return `boards/${file.split(".")[0]}`;
-        };
-
-        const allImages = [
-            ...(board.images?.tablero || []),
-            ...(board.images?.unifilar || []),
-            ...(board.images?.termografia || []),
-        ];
-
-        for (const url of allImages) {
-            try {
-                const publicId = extractPublicId(url);
-                await cloudinary.uploader.destroy(publicId);
-            } catch (err) {}
+            await cloudinary.uploader.destroy(`boards/termografia/${file.split(".")[0]}`);
+          } catch (err) {
+            console.error("Error al borrar imagen de termografía en Cloudinary:", err.message);
+          }
         }
-
-        await board.deleteOne();
-
-        return res.json({
-            message: "Tablero eliminado correctamente",
-        });
-    } catch (error) {
-        return res.status(500).json({ message: error.message });
+      }
+    } catch (err) {
+      console.warn("Aviso al consultar imágenes de termografía:", err.message);
     }
+
+    // -------------------------------------------------------------
+    // 4. Borrado en cascada en la base de datos
+    // -------------------------------------------------------------
+    const deleteOperations = [];
+
+    // Colecciones con Schema donde boardId es ObjectId
+    if (objectIdFilter.length > 0) {
+      deleteOperations.push(
+        Measurement.deleteMany(strictObjectIdQuery).catch(() =>
+          Measurement.deleteMany(flexibleQuery)
+        ),
+        Thermography.deleteMany(strictObjectIdQuery).catch(() =>
+          Thermography.deleteMany(flexibleQuery)
+        ),
+        VoltageEvent.deleteMany(strictObjectIdQuery).catch(() =>
+          VoltageEvent.deleteMany(flexibleQuery)
+        )
+      );
+    } else {
+      deleteOperations.push(
+        Measurement.deleteMany(flexibleQuery),
+        Thermography.deleteMany(flexibleQuery),
+        VoltageEvent.deleteMany(flexibleQuery)
+      );
+    }
+
+    // Eliminación final del registro del tablero
+    deleteOperations.push(board.deleteOne());
+
+    await Promise.all(deleteOperations);
+
+    return res.json({
+      message: "Tablero y todos sus registros asociados eliminados correctamente",
+      deletedBoardId: board._id,
+      deletedCode: board.code,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error al eliminar el tablero y sus registros asociados",
+      error: error.message,
+    });
+  }
 };
 
 /**

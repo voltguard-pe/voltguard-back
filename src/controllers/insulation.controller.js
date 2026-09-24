@@ -290,10 +290,10 @@ TIPOS DE TABLERO:
 
 CÓMO DETERMINAR CUÁNTAS MEDICIONES USAR:
 - Usa primero la información registrada del tablero.
-- Si sistema = "TRIFASICO" o numeroFases = 3, considera que pueden existir L1-G, L2-G y L3-G.
-- Si sistema = "MONOFASICO", considera que solo pueden existir L1-G y L2-G como máximo.
-- Si sistema = "MONOFASICO" e incluyeNeutro = true, considera que solo debe existir L1-G.
-- Si sistema = "MONOFASICO" e incluyeNeutro = false, considera que pueden existir L1-G y L2-G.
+- Si sistema = "TRIFÁSICO" o numeroFases = 3, considera que pueden existir L1-G, L2-G y L3-G.
+- Si sistema = "MONOFÁSICO", considera que solo pueden existir L1-G y L2-G como máximo.
+- Si sistema = "MONOFÁSICO" e incluyeNeutro = true, considera que solo debe existir L1-G.
+- Si sistema = "MONOFÁSICO" e incluyeNeutro = false, considera que pueden existir L1-G y L2-G.
 - Si la información del tablero no es suficiente, usa la foto para inferir la cantidad de conductores del interruptor general.
 
 CÓMO LEER LA FOTO:
@@ -855,7 +855,7 @@ const parseNullableNumber = (value) => {
 };
 
 const isMonofasicBoard = (board) => {
-  return board.sistema === "MONOFASICO" || Number(board.numeroFases) < 3;
+  return board.sistema === "MONOFÁSICO" || Number(board.numeroFases) < 3;
 };
 
 const getMeasurementByIdOrLatest = (board, measurementId) => {

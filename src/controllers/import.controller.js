@@ -38,18 +38,18 @@ const parseCircuitType = (value) => {
     .replace(/[\u0300-\u036f]/g, "");
 
   if (
-    text === "MONOFASICO" ||
+    text === "MONOFÁSICO" ||
     text === "1F" ||
-    text === "BIFASICO"
+    text === "BIFÁSICO"
   ) {
-    return "MONOFASICO";
+    return "MONOFÁSICO";
   }
 
   if (
-    text === "TRIFASICO" ||
+    text === "TRIFÁSICO" ||
     text === "3F"
   ) {
-    return "TRIFASICO";
+    return "TRIFÁSICO";
   }
 
   return null;

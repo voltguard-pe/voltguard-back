@@ -17,7 +17,7 @@ const circuitSchema = new mongoose.Schema(
         },
         tipo: {
             type: String,
-            enum: ["MONOFASICO", "TRIFASICO", null],
+            enum: ["MONOFÁSICO", "TRIFÁSICO", null],
             default: null,
         },
     },
@@ -155,7 +155,7 @@ const boardSchema = new mongoose.Schema(
 
         sistema: {
             type: String,
-            enum: ["MONOFASICO", "TRIFASICO"],
+            enum: ["MONOFÁSICO", "TRIFÁSICO"],
         },
 
         // UBICACIÓN
@@ -233,6 +233,27 @@ const boardSchema = new mongoose.Schema(
         },
         
         /************************************************** */
+
+        /***************** TARIFAS DE ENERGÍA (RECIBO DE LUZ) *****************/
+        energyRates: {
+            tarifaHP: {
+                type: Number,
+                default: 0.3095,
+            },
+            tarifaFP: {
+                type: Number,
+                default: 0.2616,
+            },
+            receiptImageUrl: {
+                type: String,
+                default: null,
+            },
+            updatedAt: {
+                type: Date,
+                default: Date.now,
+            },
+        },
+        /*********************************************************************/
 
         // USUARIO
         createdBy: {
