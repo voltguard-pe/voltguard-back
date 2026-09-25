@@ -262,12 +262,12 @@ const boardSchema = new mongoose.Schema(
             required: true,
         },
         
-        assignedDocuments: [
-            {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "Document"
-            }
-        ]
+        // assignedDocuments: [
+        //     {
+        //         type: mongoose.Schema.Types.ObjectId,
+        //         ref: "Document"
+        //     }
+        // ]
     },
     {
         timestamps: true,

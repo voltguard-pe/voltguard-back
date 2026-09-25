@@ -13,9 +13,11 @@ const fixUtf8Name = (text = "") => {
 // Helper para subir archivos a Cloudinary como RAW (Documentos estandar)
 const uploadFromBuffer = (fileBuffer, companyPublicCode, originalName) => {
     return new Promise((resolve, reject) => {
-        const cleanName = originalName.toLowerCase().endsWith('.pdf')
-            ? originalName.replace(/\.pdf$/i, '')
-            : originalName;
+        const decodedName = fixUtf8Name(originalName);
+
+        const cleanName = decodedName.toLowerCase().endsWith('.pdf')
+            ? decodedName.replace(/\.pdf$/i, '')
+            : decodedName;
 
         const safePublicId = cleanName.replace(/[^a-zA-Z0-9_-]/g, "_");
 
@@ -38,7 +40,7 @@ const uploadFromBuffer = (fileBuffer, companyPublicCode, originalName) => {
 // 1. SUBIR MÚLTIPLES DOCUMENTOS (POST)
 export const uploadDocuments = async (req, res) => {
     try {
-        const { companyPublicCode, uploadedBy, types, titles } = req.body;
+        const { companyPublicCode, uploadedBy, titles } = req.body;
 
         // Validar que vengan archivos en la petición
         if (!req.files || req.files.length === 0) {
@@ -47,7 +49,7 @@ export const uploadDocuments = async (req, res) => {
 
         // Normalizar titles y types a Arrays por si vienen como String individual desde Multer/FormData
         const titlesArray = Array.isArray(titles) ? titles : [titles];
-        const typesArray = Array.isArray(types) ? types : [types];
+        // const typesArray = Array.isArray(types) ? types : [types];
 
         // Mapeamos los archivos para subirlos en paralelo
         const uploadPromises = req.files.map(async (file, index) => {
@@ -57,12 +59,12 @@ export const uploadDocuments = async (req, res) => {
             // Asignación segura con fallback
             const fixedName = fixUtf8Name(file.originalname);
             const documentTitle = titlesArray[index] ? fixUtf8Name(titlesArray[index]) : fixedName;
-            const documentType = typesArray[index] || "MANTENIMIENTO";
+            // const documentType = typesArray[index] || "MANTENIMIENTO";
 
             // Crear el registro de Mongo
             const newDocument = new Document({
                 title: documentTitle,
-                type: documentType,
+                // type: documentType,
                 companyPublicCode,
                 cloudinaryUrl: cloudinaryResult.secure_url,
                 cloudinaryPublicId: cloudinaryResult.public_id,
@@ -101,11 +103,11 @@ export const getDocumentsByCompany = async (req, res) => {
 export const updateDocumentData = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, type } = req.body;
+        const { title } = req.body;
 
         const updatedDocument = await Document.findByIdAndUpdate(
             id,
-            { $set: { title, type } },
+            { $set: { title } },
             { new: true }
         );
 

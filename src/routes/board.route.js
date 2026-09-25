@@ -7,7 +7,7 @@ import {
   publicGetCompanyBoardByCode,
   publicGetCompanyBoards,
   updateBoard,
-  assignDocumentsToBoard,
+  // assignDocumentsToBoard,
   bulkMoveBoardsToCompany
 } from "../controllers/board.controller.js";
 
@@ -45,11 +45,11 @@ router.post(
   createBoard
 );
 
-router.put(
-  "/:publicCode/:code/assign-documents",
-  requireRole("SUPERADMIN"), // O el rol mínimo que consideres pertinente
-  assignDocumentsToBoard
-);
+// router.put(
+//   "/:publicCode/:code/assign-documents",
+//   requireRole("SUPERADMIN"), // O el rol mínimo que consideres pertinente
+//   assignDocumentsToBoard
+// );
 
 // router.put("/:publicCode/:code", updateBoard);
 router.put(
