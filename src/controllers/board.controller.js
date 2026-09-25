@@ -215,7 +215,7 @@ const sanitizeBoardByPlan = (boardObj, plan = "basico") => {
         }
         delete sanitized.nfpa;
         delete sanitized.insulationMeasurements; // Solo accesible en planes superiores/empresarial
-        sanitized.assignedDocuments = [];
+        // sanitized.assignedDocuments = [];
     } 
     // PLAN INTERMEDIO: Añade Unifilar y Certificados. Oculta Termografía, NFPA y SPAT
     else if (plan === "intermedio") {
@@ -255,8 +255,8 @@ export const getBoardByCode = async (req, res) => {
             code,
             companyPublicCode: publicCode,
         })
-            .populate("createdBy", "firstname lastname email")
-            .populate("assignedDocuments");
+            .populate("createdBy", "firstname lastname email");
+            // .populate("assignedDocuments");
 
         if (!board) {
             return res.status(404).json({
@@ -634,10 +634,15 @@ export const publicGetCompanyBoardByCode = async (req, res) => {
             return res.status(404).json({ message: "Empresa no encontrada" });
         }
 
+        // const board = await Board.findOne({
+        //     code,
+        //     companyPublicCode: publicCode,
+        // }).populate("assignedDocuments");
+
         const board = await Board.findOne({
             code,
             companyPublicCode: publicCode,
-        }).populate("assignedDocuments");
+        });
 
         if (!board) {
             return res.status(404).json({ message: "Tablero no encontrado" });
