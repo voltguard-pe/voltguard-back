@@ -27,6 +27,12 @@ export const createCompany = async (req, res) => {
 // ✅ Listar empresas (SUPERADMIN)
 export const getCompanies = async (req, res) => {
   try {
+    // Si es ADMIN, solo devolver su propia empresa
+    if (req.user.role === "ADMIN" || req.user.role === "USER") {
+      const company = await Company.find({ publicCode: req.user.companyPublicCode });
+      return res.status(200).json(company);
+    }
+
     const companies = await Company.find().sort({ createdAt: -1 });
     return res.json(companies);
   } catch (error) {

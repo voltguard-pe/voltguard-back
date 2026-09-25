@@ -12,17 +12,17 @@ import { authMiddleware, requireRole } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-// 🌐 Públicas / USER
+// 🌐 1. Rutas Públicas (QR, accesos sin login)
 router.get("/public", publicGetCompanies);
 router.get("/public/:code/boards", getBoardsByCompanyCode);
 
-// 🔒 Privadas / SUPERADMIN
-router.use(authMiddleware, requireRole("SUPERADMIN"));
+// 🔒 2. Rutas que requieren estar autenticado (SUPERADMIN y ADMIN pueden leer)
+router.get("/", authMiddleware, getCompanies);
+router.get("/:publicCode", authMiddleware, getCompanyByCode);
 
-router.post("/", createCompany);
-router.get("/", getCompanies);
-router.get("/:publicCode", getCompanyByCode);
-router.put("/:publicCode", updateCompany);
-router.delete("/:publicCode", deleteCompany);
+// 🛡️ 3. Rutas exclusivas de mutación administrativa (Solo SUPERADMIN)
+router.post("/", authMiddleware, requireRole("SUPERADMIN"), createCompany);
+router.put("/:publicCode", authMiddleware, requireRole("SUPERADMIN"), updateCompany);
+router.delete("/:publicCode", authMiddleware, requireRole("SUPERADMIN"), deleteCompany);
 
 export default router;
