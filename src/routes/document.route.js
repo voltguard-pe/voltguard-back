@@ -3,7 +3,8 @@ import {
     uploadDocuments,
     getDocumentsByCompany,
     updateDocumentData,
-    deleteDocument
+    deleteDocument,
+    getDocumentById
 } from "../controllers/document.controller.js";
 import { upload } from "../middlewares/upload.middleware.js"; // Tu archivo de configuración de Multer
 
@@ -15,5 +16,6 @@ router.post("/", upload.array("files", 5), uploadDocuments);
 router.get("/company/:companyPublicCode", getDocumentsByCompany);
 router.put("/:id", updateDocumentData);
 router.delete("/:id", deleteDocument);
+router.get("/:id", getDocumentById);
 
 export default router;

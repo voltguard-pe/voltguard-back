@@ -1,11 +1,20 @@
 import Document from "../models/Document.js";
 import { v2 as cloudinary } from "cloudinary";
 
+// Corrige la codificación latin1 a UTF-8 para preservar tildes, ñ y caracteres especiales
+const fixUtf8Name = (text = "") => {
+    try {
+        return Buffer.from(text, "latin1").toString("utf-8");
+    } catch {
+        return text;
+    }
+};
+
 // Helper para subir archivos a Cloudinary como RAW (Documentos estandar)
 const uploadFromBuffer = (fileBuffer, companyPublicCode, originalName) => {
     return new Promise((resolve, reject) => {
-        const cleanName = originalName.toLowerCase().endsWith('.pdf') 
-            ? originalName.replace(/\.pdf$/i, '') 
+        const cleanName = originalName.toLowerCase().endsWith('.pdf')
+            ? originalName.replace(/\.pdf$/i, '')
             : originalName;
 
         const safePublicId = cleanName.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -46,7 +55,8 @@ export const uploadDocuments = async (req, res) => {
             const cloudinaryResult = await uploadFromBuffer(file.buffer, companyPublicCode, file.originalname);
 
             // Asignación segura con fallback
-            const documentTitle = titlesArray[index] || file.originalname;
+            const fixedName = fixUtf8Name(file.originalname);
+            const documentTitle = titlesArray[index] ? fixUtf8Name(titlesArray[index]) : fixedName;
             const documentType = typesArray[index] || "MANTENIMIENTO";
 
             // Crear el registro de Mongo
@@ -125,5 +135,19 @@ export const deleteDocument = async (req, res) => {
         return res.status(200).json({ message: "Documento eliminado correctamente" });
     } catch (error) {
         return res.status(500).json({ message: "Error al eliminar el documento", error: error.message });
+    }
+};
+
+// 5. OBTENER UN DOCUMENTO POR ID (GET)
+export const getDocumentById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const document = await Document.findById(id);
+        if (!document) {
+            return res.status(404).json({ message: "Documento no encontrado" });
+        }
+        return res.status(200).json(document);
+    } catch (error) {
+        return res.status(500).json({ message: "Error al obtener el documento", error: error.message });
     }
 };
