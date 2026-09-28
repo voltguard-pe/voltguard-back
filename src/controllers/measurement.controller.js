@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 
 const parseMetrelFloat = (textoRaw) => {
   if (!textoRaw) return 0;
-  let limpio = textoRaw.replace(/[^\d.,-]/g, '');
+  let limpio = String(textoRaw).replace(/[^\d.,-]/g, '');
   if (limpio.includes(',') && limpio.includes('.')) {
     limpio = limpio.replace(/,/g, '');
   } else if (limpio.includes(',') && !limpio.includes('.')) {
@@ -11,6 +11,27 @@ const parseMetrelFloat = (textoRaw) => {
   }
   const valor = parseFloat(limpio);
   return isNaN(valor) ? 0 : valor;
+};
+
+// Función auxiliar: Detección universal de cabeceras THD (%)
+// Compatible con conexiones Delta (U12, U23, U31) y Estrella (U1, U2, U3)
+const encontrarColumnaTHDU = (columnas, fase) => {
+  return columnas.findIndex(col => {
+    const c = col.toLowerCase();
+    // Exigir 'thd' y el símbolo '%' obligatoriamente para descartar las columnas en Voltios [V]
+    if (!c.includes('thd') || !c.includes('%')) return false;
+
+    if (fase === 1) {
+      return c.includes('u12') || (c.includes('u1') && !c.includes('u12') && !c.includes('u31'));
+    }
+    if (fase === 2) {
+      return c.includes('u23') || (c.includes('u2') && !c.includes('u23'));
+    }
+    if (fase === 3) {
+      return c.includes('u31') || (c.includes('u3') && !c.includes('u31'));
+    }
+    return false;
+  });
 };
 
 // A. IMPORTACIÓN CON LECTURA DINÁMICA DE CABECERAS
@@ -40,14 +61,16 @@ export const importMetrel = async (req, res) => {
           eptot: columnas.findIndex(c => c.toLowerCase().includes('eptot')),
           cap: columnas.findIndex(c => c.toLowerCase().includes('ntotcap')),
           ind: columnas.findIndex(c => c.toLowerCase().includes('ntotind')),
-          // Armónicos de Tensión (U1, U2, U3)
-          thdu1: columnas.findIndex(c => /thd.*u.*1|thdu1/i.test(c)),
-          thdu2: columnas.findIndex(c => /thd.*u.*2|thdu2/i.test(c)),
-          thdu3: columnas.findIndex(c => /thd.*u.*3|thdu3/i.test(c)),
-          // Armónicos de Corriente (I1, I2, I3)
-          thdi1: columnas.findIndex(c => /thd.*i.*1|thdi1/i.test(c)),
-          thdi2: columnas.findIndex(c => /thd.*i.*2|thdi2/i.test(c)),
-          thdi3: columnas.findIndex(c => /thd.*i.*3|thdi3/i.test(c)),
+
+          // Armónicos de Tensión (%) - Detección universal U1/U12, U2/U23, U3/U31
+          thdu1: encontrarColumnaTHDU(columnas, 1),
+          thdu2: encontrarColumnaTHDU(columnas, 2),
+          thdu3: encontrarColumnaTHDU(columnas, 3),
+
+          // Armónicos de Corriente (%)
+          thdi1: columnas.findIndex(c => /thd.*i.*1/i.test(c) && c.includes('%')),
+          thdi2: columnas.findIndex(c => /thd.*i.*2/i.test(c) && c.includes('%')),
+          thdi3: columnas.findIndex(c => /thd.*i.*3/i.test(c) && c.includes('%')),
         };
         continue;
       }
@@ -62,14 +85,14 @@ export const importMetrel = async (req, res) => {
       const rawVarCap = parseMetrelFloat(columnas[colIndices.cap !== -1 ? colIndices.cap : 2]);
       const rawVarInd = parseMetrelFloat(columnas[colIndices.ind !== -1 ? colIndices.ind : 3]);
 
-      // Lectura y promedio de Armónicos de Tensión (%)
+      // Lectura individual de Armónicos de Tensión (%)
       const u1 = colIndices.thdu1 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu1]) : 0;
       const u2 = colIndices.thdu2 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu2]) : 0;
       const u3 = colIndices.thdu3 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu3]) : 0;
       const cantU = (u1 > 0 ? 1 : 0) + (u2 > 0 ? 1 : 0) + (u3 > 0 ? 1 : 0);
       const thdVAvg = cantU > 0 ? (u1 + u2 + u3) / cantU : 0;
 
-      // Lectura y promedio de Armónicos de Corriente (%)
+      // Lectura individual de Armónicos de Corriente (%)
       const i1 = colIndices.thdi1 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi1]) : 0;
       const i2 = colIndices.thdi2 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi2]) : 0;
       const i3 = colIndices.thdi3 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi3]) : 0;
@@ -110,7 +133,15 @@ export const importMetrel = async (req, res) => {
         demandaKw: Number(kw.toFixed(2)),
         reactivaCapKvar: Number(kvarCap.toFixed(2)),
         reactivaIndKvar: Number(kvarInd.toFixed(2)),
+        // Guardado de cada fase individual de Tensión
+        thd_u12: Number(u1.toFixed(2)),
+        thd_u23: Number(u2.toFixed(2)),
+        thd_u31: Number(u3.toFixed(2)),
         thdVoltaje: Number(thdVAvg.toFixed(2)),
+        // Guardado de cada fase individual de Corriente
+        thd_i1: Number(i1.toFixed(2)),
+        thd_i2: Number(i2.toFixed(2)),
+        thd_i3: Number(i3.toFixed(2)),
         thdCorriente: Number(thdIAvg.toFixed(2))
       });
     }
@@ -134,7 +165,7 @@ export const importMetrel = async (req, res) => {
   }
 };
 
-// B. CONSULTA EXTENDIDA CON INCLUSIÓN DE thd_v Y thd_i
+// B. CONSULTA EXTENDIDA CON INCLUSIÓN DE FASES u12, u23, u31
 export const chartData = async (req, res) => {
   try {
     const { boardId } = req.params;
@@ -145,14 +176,14 @@ export const chartData = async (req, res) => {
       { $group: { _id: null, min: { $min: "$fecha" }, max: { $max: "$fecha" } } }
     ]);
 
-    const minFechaDisponible = limites[0]?.min || "2026-06-20";
-    const maxFechaDisponible = limites[0]?.max || "2026-06-30";
+    const minFechaDisponible = limites[0]?.min || "2026-09-01";
+    const maxFechaDisponible = limites[0]?.max || "2026-09-08";
 
     const query = { boardId };
     if (fechaInicio && fechaFin) {
-      query.fecha = { $gte: fechaInicio, $lte: fechaFin };
+      query.fecha = { $gte: fechaInicio,$lte: fechaFin };
     } else {
-      query.fecha = { $gte: minFechaDisponible, $lte: maxFechaDisponible };
+      query.fecha = { $gte: minFechaDisponible,$lte: maxFechaDisponible };
     }
 
     const datos = await Measurement.find(query).sort({ timestamp: 1 });
@@ -203,8 +234,16 @@ export const chartData = async (req, res) => {
           p: item.demandaKw,
           ind: item.reactivaIndKvar,
           cap: item.reactivaCapKvar,
-          thd_v: item.thdVoltaje || 0,     // 👈 Enviado al frontend
-          thd_i: item.thdCorriente || 0    // 👈 Enviado al frontend
+          // Fases individuales THD-U (%) enviadas al frontend
+          thd_u12: item.thd_u12 || 0,
+          thd_u23: item.thd_u23 || 0,
+          thd_u31: item.thd_u31 || 0,
+          thd_v: item.thdVoltaje || 0,
+          // Fases individuales THD-I (%) enviadas al frontend
+          thd_i1: item.thd_i1 || 0,
+          thd_i2: item.thd_i2 || 0,
+          thd_i3: item.thd_i3 || 0,
+          thd_i: item.thdCorriente || 0
         };
       }
     });

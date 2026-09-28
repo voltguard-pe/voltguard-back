@@ -9,12 +9,21 @@ const MeasurementSchema = new mongoose.Schema({
   demandaKw: { type: Number, required: true },     // Convertido a kW (Eptot+)
   reactivaIndKvar: { type: Number, required: true }, // Convertido a kvar (Ntotind+)
   reactivaCapKvar: { type: Number, required: true }, // Convertido a kvar (Ntotcap+)
-  // ── CAMPOS NUEVOS PARA DISTORSIÓN ARMÓNICA ──
+
+  // ── DISTORSIÓN ARMÓNICA DE TENSIÓN (THD-U %) ──
+  thd_u12: { type: Number, default: 0 },           // Fase 1 o Línea 12 en %
+  thd_u23: { type: Number, default: 0 },           // Fase 2 o Línea 23 en %
+  thd_u31: { type: Number, default: 0 },           // Fase 3 o Línea 31 en %
   thdVoltaje: { type: Number, default: 0 },        // Promedio (THDu1 + THDu2 + THDu3) / 3 en %
+
+  // ── DISTORSIÓN ARMÓNICA DE CORRIENTE (THD-I %) ──
+  thd_i1: { type: Number, default: 0 },            // Corriente Fase 1 en %
+  thd_i2: { type: Number, default: 0 },            // Corriente Fase 2 en %
+  thd_i3: { type: Number, default: 0 },            // Corriente Fase 3 en %
   thdCorriente: { type: Number, default: 0 }       // Promedio (THDi1 + THDi2 + THDi3) / 3 en %
 });
 
 MeasurementSchema.index({ boardId: 1, timestamp: 1 }, { unique: true });
 
-const MeasurementModel = mongoose.model('Measurement', MeasurementSchema);
+const MeasurementModel = mongoose.models.Measurement || mongoose.model('Measurement', MeasurementSchema);
 export default MeasurementModel;
