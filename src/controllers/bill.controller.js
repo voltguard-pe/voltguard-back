@@ -13,8 +13,6 @@ export const extractElectricityRates = async (req, res) => {
     }
 
     const mime = file.mimetype || "image/jpeg";
-
-    // Validar que sea una imagen compatible con el modelo de visión
     if (!mime.startsWith("image/")) {
       return res.status(400).json({
         error: "Formato no compatible. Por favor sube una imagen (JPG, PNG o WEBP) de tu recibo de luz."
@@ -24,22 +22,34 @@ export const extractElectricityRates = async (req, res) => {
     const base64Data = `data:${mime};base64,${file.buffer.toString("base64")}`;
 
     const prompt = `Analiza este recibo de servicio eléctrico (Luz del Sur / Enel / etc.).
-Dirígete a la sección "DETALLE DE LOS IMPORTES FACTURADOS".
-Ubica la columna "Precio Unitario" para los siguientes conceptos:
-1. "Consumo de Energía Hora Punta" (corresponde a tarifaHP)
-2. "Consumo de Energía Fuera Punta" (corresponde a tarifaFP)
+1. En "DETALLE DE LOS IMPORTES FACTURADOS", ubica el "Precio Unitario" para:
+   - "Consumo de Energía Hora Punta" (tarifaHP)
+   - "Consumo de Energía Fuera Punta" (tarifaFP)
+2. En la sección de "HISTORIAL DE CONSUMOS" o "EVOLUCIÓN DEL CONSUMO" (los meses facturados anteriores):
+   - Extrae la lista histórica disponible de meses/periodos facturados con su costo o consumo.
+   - Si se desglosan importes de Hora Punta y Fuera Punta por mes o el total facturado, extráelos. Si solo figura el importe total o kWh, calcúlalos o asígnalos proporcionalmente.
 
-Devuelve ÚNICAMENTE un objeto JSON estrictamente válido con este formato exacto:
+Devuelve ÚNICAMENTE un objeto JSON estrictamente válido con este formato:
 {
   "tarifaHP": 0.3095,
-  "tarifaFP": 0.2616
+  "tarifaFP": 0.2616,
+  "history": [
+    {
+      "period": "Oct 25",
+      "costoFP": 2150.40,
+      "costoHP": 950.20,
+      "costoTotal": 3100.60
+    },
+    {
+      "period": "Nov 25",
+      "costoFP": 2300.10,
+      "costoHP": 1020.50,
+      "costoTotal": 3320.60
+    }
+  ]
 }
 
-Si la imagen no es un recibo de luz o no se aprecian con claridad las tarifas unitarias, devuelve valores nulos:
-{
-  "tarifaHP": null,
-  "tarifaFP": null
-}`;
+Si no se aprecian datos históricos en la imagen, genera el mes actual facturado en "history". Si la imagen no es un recibo legible, devuelve valores nulos.`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -66,20 +76,21 @@ Si la imagen no es un recibo de luz o no se aprecian con claridad las tarifas un
 
     const tarifaHP = parsed.tarifaHP != null ? Number(parsed.tarifaHP) : null;
     const tarifaFP = parsed.tarifaFP != null ? Number(parsed.tarifaFP) : null;
+    const history = Array.isArray(parsed.history) ? parsed.history : [];
 
-    // Validación estricta: Si la IA no encontró números válidos, no guardar datos inventados
     if (!tarifaHP || !tarifaFP || isNaN(tarifaHP) || isNaN(tarifaFP)) {
       return res.status(422).json({
-        error: "No se pudieron extraer las tarifas de Hora Punta y Fuera de Punta del documento adjunto. Asegúrate de que la sección de importes facturados sea legible."
+        error: "No se pudieron extraer los datos del recibo. Asegúrate de que los importes facturados sean legibles."
       });
     }
 
-    // Guardar directamente en el tablero en MongoDB si se proporciona boardId
+    // Persistir tarifas e historial en el Tablero
     if (boardId) {
       await Board.findByIdAndUpdate(boardId, {
         $set: {
           "energyRates.tarifaHP": tarifaHP,
           "energyRates.tarifaFP": tarifaFP,
+          "energyRates.history": history,
           "energyRates.updatedAt": new Date(),
         },
       });
@@ -87,14 +98,15 @@ Si la imagen no es un recibo de luz o no se aprecian con claridad las tarifas un
 
     return res.status(200).json({
       success: true,
-      message: "Tarifas extraídas y actualizadas correctamente con Inteligencia Artificial.",
+      message: "Recibo analizado y guardado exitosamente.",
       data: {
         tarifaHP,
         tarifaFP,
+        history,
       },
     });
   } catch (error) {
-    console.error("Error al procesar tarifas del recibo en OpenAI:", error);
+    console.error("Error al procesar recibo en OpenAI:", error);
     return res.status(500).json({ 
       error: "Error interno al analizar el recibo de luz: " + error.message 
     });

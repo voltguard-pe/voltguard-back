@@ -238,11 +238,11 @@ const boardSchema = new mongoose.Schema(
         energyRates: {
             tarifaHP: {
                 type: Number,
-                default: 0.3095,
+                default: null,
             },
             tarifaFP: {
                 type: Number,
-                default: 0.2616,
+                default: null,
             },
             receiptImageUrl: {
                 type: String,
