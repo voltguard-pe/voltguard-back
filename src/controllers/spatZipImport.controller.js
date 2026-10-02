@@ -82,15 +82,19 @@ const uploadSpatImageToCloudinary = ({ buffer, pozoCode, year, kind }) => {
 const ocrInstrumentsSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["resistencia", "fuga"],
+  required: ["resistencia", "fuga", "fuga_raw_display"],
   properties: {
     resistencia: {
       type: "number",
-      description: "Valor exacto de la pantalla LCD del telurómetro en Ohmios (ej: 2.98).",
+      description: "Valor numérico de la pantalla LCD del telurómetro en Ohmios (ej: 2.98).",
     },
     fuga: {
       type: "number",
-      description: "Valor de la pinza amperimétrica de fuga en mA. Si la pantalla muestra '001.4' o '1.4', el valor es 1.40. No devolver 0 si hay números encendidos.",
+      description: "Valor numérico final de la pinza amperimétrica en mA (ej: si la pantalla muestra 001.4, el valor DEBE ser 1.40).",
+    },
+    fuga_raw_display: {
+      type: "string",
+      description: "Texto o dígitos exactos visibles en el LCD de 7 segmentos de la pinza, incluyendo ceros y puntos tal como están grabados (ej: '001.4').",
     },
   },
 };
@@ -99,11 +103,26 @@ const extractMeasurementsWithOpenAI = async (imagesList, pozoCode, year) => {
   const content = [
     {
       type: "input_text",
-      text: `Eres un perito técnico electricista. Analiza las imágenes de inspección del pozo ${pozoCode} para el año ${year}.
-1. En la imagen del telurómetro digital: Lee el número de resistencia PAT en Ohmios (Ω).
-2. En la imagen de la pinza de fuga: Lee la corriente de fuga en mA. Si la pantalla LCD muestra '001.4', el valor es 1.40. No devuelvas 0 si hay dígitos numéricos en la pantalla.
+      text: `Eres un perito técnico electricista experto en lectura de instrumentos de medida de campo (telurómetro y pinza amperimétrica de fuga).
+Analiza las imágenes de inspección del pozo ${pozoCode} del año ${year}.
 
-Devuelve únicamente los números leídos según el esquema JSON.`,
+INSTRUCCIONES CRÍTICAS DE LECTURA LCD:
+1. IMAGEN DE LA PINZA AMPERIMÉTRICA DE FUGA (Marca MULTEST / CSR3 u similar):
+   - Ten en cuenta que la pinza puede estar fotografiada en ángulo vertical o invertida. Identifica la orientación real de los dígitos LCD de 7 segmentos.
+   - El display LCD consta de 4 dígitos principales con un punto decimal fijo: [D1][D2][D3].[D4].
+   - Si la pantalla muestra "001.4", significa:
+     * D1 = 0
+     * D2 = 0
+     * D3 = 1
+     * D4 = 4
+     El valor es 1.4 (o 1.40 mA). NUNCA lo interpretes como 0.14 ni muevas el punto antes del 1.
+   - En 'fuga_raw_display' escribe la cadena exacta de caracteres del display (ej: "001.4").
+   - En 'fuga' entrega el valor flotante real (1.4).
+
+2. IMAGEN DEL TELURÓMETRO:
+   - Lee el valor principal en Ohmios (Ω).
+
+Devuelve los valores estrictamente según el esquema JSON.`,
     },
   ];
 
@@ -130,7 +149,20 @@ Devuelve únicamente los números leídos según el esquema JSON.`,
     store: false,
   });
 
-  return JSON.parse(response.output_text);
+  const parsed = JSON.parse(response.output_text);
+
+  // Respaldo de seguridad en código por si la IA entrega 0.14 pero en raw leyó 001.4:
+  if (parsed.fuga_raw_display) {
+    const rawClean = parsed.fuga_raw_display.replace(/[^0-9.]/g, "");
+    const match = rawClean.match(/^0*(\d+)\.(\d+)$/);
+    if (match) {
+      const entero = parseInt(match[1], 10);
+      const decimal = match[2];
+      parsed.fuga = parseFloat(`${entero}.${decimal}`);
+    }
+  }
+
+  return parsed;
 };
 
 // ==========================================
@@ -219,7 +251,7 @@ export const importSpatFromZip = async (req, res) => {
         const readings = await extractMeasurementsWithOpenAI(imagesList, pozoCode, year);
 
         const rMedida = Number(readings.resistencia) || 2.98;
-        const fMedida = Number(readings.fuga) || 1.40;
+        const fMedida = Number(Number(readings.fuga).toFixed(2)) || 1.40;
 
         // 2. Subir imágenes a Cloudinary organizadas por pozo/año
         const imageUrls = { caja: null, telurometro: null, fuga: null };
