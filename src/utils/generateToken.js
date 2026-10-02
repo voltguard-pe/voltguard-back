@@ -5,9 +5,10 @@ export const generateToken = (user) => {
     {
       id: user.id,
       role: user.role,
-      company: user.company,
+      plan: user.plan,
+      company: user.companyPublicCode || user.company,
     },
     process.env.JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "30d" }
   );
 };

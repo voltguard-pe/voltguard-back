@@ -186,7 +186,9 @@ export const login = async (req, res) => {
                 id: user._id,
                 firstname: user.firstname,
                 lastname: user.lastname,
+                email: user.email,
                 role: user.role,
+                plan: user.plan,
                 companyPublicCode: user.companyPublicCode,
             },
         });
