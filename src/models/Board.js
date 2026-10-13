@@ -106,6 +106,25 @@ const insulationMeasurementSchema = new mongoose.Schema(
 );
 
 // =========================
+// ⚡ HISTORIAL DE ENERGÍA (RECIBO DE LUZ)
+// =========================
+// Un elemento por mes facturado. Si un campo no está declarado aquí,
+// Mongoose lo descarta en silencio al guardar.
+const energyHistoryItemSchema = new mongoose.Schema(
+    {
+        period: { type: String, trim: true },       // "Abr 26"
+        dias: { type: Number, default: 30 },
+        kwhHP: { type: Number, default: null },
+        kwhFP: { type: Number, default: null },
+        kwhTotal: { type: Number, default: null },
+        costoHP: { type: Number, default: null },    // solo el mes actual trae importes
+        costoFP: { type: Number, default: null },
+        costoTotal: { type: Number, default: null },
+    },
+    { _id: false },
+);
+
+// =========================
 // 🧱 BOARD
 // =========================
 const boardSchema = new mongoose.Schema(
@@ -243,6 +262,11 @@ const boardSchema = new mongoose.Schema(
             tarifaFP: {
                 type: Number,
                 default: null,
+            },
+            // 👇 NUEVO: historial de los últimos 12 meses leído del recibo
+            history: {
+                type: [energyHistoryItemSchema],
+                default: [],
             },
             receiptImageUrl: {
                 type: String,
