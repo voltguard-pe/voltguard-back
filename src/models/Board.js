@@ -250,7 +250,7 @@ const boardSchema = new mongoose.Schema(
             },
             default: undefined // 👈 ESTA LINEA EVITA QUE MONGOOSE LO CREA POR DEFECTO
         },
-        
+
         /************************************************** */
 
         /***************** TARIFAS DE ENERGÍA (RECIBO DE LUZ) *****************/
@@ -264,18 +264,21 @@ const boardSchema = new mongoose.Schema(
                 default: null,
             },
             // 👇 NUEVO: historial de los últimos 12 meses leído del recibo
-            history: {
-                type: [energyHistoryItemSchema],
-                default: [],
-            },
-            receiptImageUrl: {
-                type: String,
-                default: null,
-            },
-            updatedAt: {
-                type: Date,
-                default: Date.now,
-            },
+            history: [
+                {
+                    period: String,
+                    dias: Number,
+                    kwhHP: Number,
+                    kwhFP: Number,
+                    kwhTotal: Number,
+                    costoHP: Number,
+                    costoFP: Number,
+                    costoEnergia: Number,
+                    costoTotal: Number,
+                    totalEsEstimado: Boolean,
+                    _id: false,
+                },
+            ],
         },
         /*********************************************************************/
 
@@ -285,7 +288,7 @@ const boardSchema = new mongoose.Schema(
             ref: "User",
             required: true,
         },
-        
+
         // assignedDocuments: [
         //     {
         //         type: mongoose.Schema.Types.ObjectId,

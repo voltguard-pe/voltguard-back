@@ -57,7 +57,7 @@ A) En "DETALLE DE LOS IMPORTES FACTURADOS" hay una tabla con columnas
    Descripción | Precio Unitario | Consumo | Importe. Extrae de las filas:
    - "Consumo de Energía Hora Punta": precio unitario (tarifaHP), Consumo en kWh (kwhHP) e Importe en soles (importeHP)
    - "Consumo de Energía Fuera Punta": precio unitario (tarifaFP), Consumo en kWh (kwhFP) e Importe en soles (importeFP)
-   NO uses la fila de energía reactiva ni las de potencia.
+   NO uses la fila de energía reactiva ni las de potencia para estos campos.
 
 B) En "Energía Activa (kW.h)" busca las fechas de "Lectura Actual" y "Lectura Anterior"
    (formato DD/MM/AAAA) y devuélvelas en fechaLecturaActual y fechaLecturaAnterior.
@@ -66,6 +66,16 @@ C) Abajo del recibo hay una tabla pequeña "Historia de Consumos y Demandas" con
    columna por mes (My, Jn, Jl, Ag, Se, Oc, Nv, Di, En, Fe, Mr, Ab). Tiene la fila "kW.h - FP"
    y la fila "kW.h - HP" (son kWh, NO soles). Devuelve cada fila como una lista con TODOS
    sus valores de izquierda a derecha (normalmente 12), sin saltarte ninguno.
+
+D) Importes totales:
+   - "TOTAL A PAGAR S/": devuélvelo en totalPagar (sin asteriscos ni comas).
+   - "SUBTOTAL DEL MES": devuélvelo en subtotalMes.
+   - De la tabla de importes, devuelve los importes en soles de: "Consumo de Energía Reactiva"
+     (importeReactiva), "Potencia Generación" (importePotenciaGeneracion),
+     "Potencia Distribución" (importePotenciaDistribucion) e "I.G.V." (importeIGV).
+   - Debajo del gráfico de barras dice "Importe 2 Últimos Meses Facturados" con dos montos
+     (por ejemplo "Feb-26 S/ 00,000.00  Mar-26 S/ 00,000.00"). Devuélvelos en ultimosMeses,
+     en el mismo orden en que aparecen, con "mes" y "total" (número).
 
 Devuelve ÚNICAMENTE este JSON:
 {
@@ -77,12 +87,19 @@ Devuelve ÚNICAMENTE este JSON:
     "importeHP": 3871.30,
     "importeFP": 19705.56,
     "fechaLecturaActual": "30/04/2026",
-    "fechaLecturaAnterior": "30/03/2026"
+    "fechaLecturaAnterior": "30/03/2026",
+    "totalPagar": 10000.00,
+    "subtotalMes": 10000.00,
+    "importeReactiva": 1000.00,
+    "importePotenciaGeneracion": 2000.00,
+    "importePotenciaDistribucion": 1000.00,
+    "importeIGV": 1500.00
   },
+  "ultimosMeses": [ { "mes": "Ene-26", "total": 9000.00 }, { "mes": "Feb-26", "total": 9500.00 } ],
   "historialFP": [60332, 61198, 56650, 52446, 54836, 54273, 58258, 65045, 73798, 88541, 81327, 80365],
   "historialHP": [11418, 11803, 11033, 9838, 11253, 11940, 12421, 12160, 12971, 15499, 13630, 13603]
 }
-Los números de historialFP e historialHP del ejemplo son solo de formato: copia los del recibo.
+Los números de historialFP, historialHP y los importes totales del ejemplo son solo de formato: copia los del recibo.
 Si un dato no se ve, ponlo en null. No inventes valores.`;
 
 // Segundo intento: solo la tabla, RECORTADA y ampliada. Se pide por columna (mes + fp + hp)
@@ -215,6 +232,31 @@ export const extractElectricityRates = async (req, res) => {
       });
     }
 
+    // ── Total facturado y factor para estimar meses sin total ──
+    const energiaActual =
+      (importeHP ?? kwhHPActual * tarifaHP) + (importeFP ?? kwhFPActual * tarifaFP);
+
+    const totalLeido = num(a.totalPagar) ?? num(a.subtotalMes);
+    // Plausible: el total no puede ser menor que la energía ni más de 6 veces mayor
+    const totalActual =
+      totalLeido && totalLeido >= energiaActual * 0.99 && totalLeido <= energiaActual * 6
+        ? totalLeido
+        : null;
+    const factorFactura = totalActual ? totalActual / energiaActual : null;
+
+    // Totales reales de los 2 meses anteriores (el último de la lista es el mes inmediato anterior)
+    const ultimos = Array.isArray(parsed.ultimosMeses)
+      ? parsed.ultimosMeses.map((x) => num(x?.total))
+      : [];
+    const totalRealMes = (back, energiaMes) => {
+      if (back === 0) return totalActual;
+      if (back > ultimos.length) return null;
+      const v = ultimos[ultimos.length - back];
+      if (!v || !factorFactura) return v || null;
+      const ratio = v / (energiaMes * factorFactura);
+      return ratio >= 0.5 && ratio <= 2 ? v : null; // descarta lecturas absurdas
+    };
+
     // ── Últimos 12 meses (tabla pequeña) ──
     let tabla = validarTabla(parsed.historialFP, parsed.historialHP, kwhFPActual, kwhHPActual);
 
@@ -272,8 +314,24 @@ export const extractElectricityRates = async (req, res) => {
       if (back === 0) {
         dias = diffDays(a.fechaLecturaActual, a.fechaLecturaAnterior) ?? dias;
       }
+
       const hp = hpArr[i];
       const fp = fpArr[i];
+
+      // Energía activa del mes (los meses pasados usan la tarifa actual)
+      const energiaMes = round2(back === 0 ? energiaActual : hp * tarifaHP + fp * tarifaFP);
+
+      // Total facturado: real (mes actual y 2 anteriores) o estimado con el factor del recibo
+      const real = totalRealMes(back, energiaMes);
+      let costoTotal = null;
+      let totalEsEstimado = false;
+      if (real) {
+        costoTotal = round2(real);
+      } else if (factorFactura) {
+        costoTotal = round2(energiaMes * factorFactura);
+        totalEsEstimado = true;
+      }
+
       history.push({
         period,
         dias,
@@ -282,9 +340,21 @@ export const extractElectricityRates = async (req, res) => {
         kwhTotal: round2(hp + fp),
         costoHP: back === 0 ? importeHP : null,
         costoFP: back === 0 ? importeFP : null,
-        costoTotal: back === 0 && importeHP && importeFP ? round2(importeHP + importeFP) : null,
+        costoEnergia: energiaMes,
+        costoTotal,
+        totalEsEstimado,
       });
     }
+
+    if (!factorFactura) {
+      const aviso = "No se pudo leer el Total a pagar del recibo; el costo mostrado incluye solo energía activa.";
+      warning = warning ? `${warning} ${aviso}` : aviso;
+    }
+
+    // ── Meta de ahorro de la empresa (viene del formulario junto con el recibo) ──
+    const ahorroRaw = req.body?.ahorroMeta;
+    const ahorroNum = ahorroRaw === undefined || ahorroRaw === "" ? NaN : Number(ahorroRaw);
+    const ahorroMeta = Number.isFinite(ahorroNum) ? Math.min(100, Math.max(0, ahorroNum)) : null;
 
     if (boardId) {
       await Board.findByIdAndUpdate(boardId, {
@@ -293,6 +363,7 @@ export const extractElectricityRates = async (req, res) => {
           "energyRates.tarifaFP": tarifaFP,
           "energyRates.history": history,
           "energyRates.updatedAt": new Date(),
+          ...(ahorroMeta !== null && { "energyRates.ahorroMeta": ahorroMeta }),
         },
       });
     }
@@ -300,7 +371,16 @@ export const extractElectricityRates = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Recibo analizado y guardado exitosamente.",
-      data: { tarifaHP, tarifaFP, history, historyOk: tabla.ok && n >= 12, warning },
+      data: {
+        tarifaHP,
+        tarifaFP,
+        history,
+        historyOk: tabla.ok && n >= 12,
+        totalActual,
+        factorFactura: factorFactura ? Math.round(factorFactura * 1000) / 1000 : null,
+        ahorroMeta,
+        warning,
+      },
     });
   } catch (error) {
     console.error("Error al procesar recibo en OpenAI:", error);
@@ -310,7 +390,22 @@ export const extractElectricityRates = async (req, res) => {
   }
 };
 
-/*
-  Schema de Board (models/Board.js): energyRates.history debe declarar
-  period, dias, kwhHP, kwhFP, kwhTotal, costoHP, costoFP, costoTotal.
-*/
+// ── Actualiza solo la meta de ahorro, sin volver a subir el recibo ──
+export const updateAhorroMeta = async (req, res) => {
+  try {
+    const { boardId } = req.params;
+    const n = Number(req.body?.ahorroMeta);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      return res.status(400).json({ error: "La meta de ahorro debe estar entre 0 y 100." });
+    }
+    const board = await Board.findByIdAndUpdate(
+      boardId,
+      { $set: { "energyRates.ahorroMeta": n } },
+      { new: true }
+    );
+    if (!board) return res.status(404).json({ error: "Tablero no encontrado." });
+    return res.status(200).json({ success: true, ahorroMeta: n });
+  } catch (error) {
+    return res.status(500).json({ error: "Error al guardar la meta de ahorro: " + error.message });
+  }
+};
