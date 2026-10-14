@@ -55,10 +55,13 @@ export const importMetrel = async (req, res) => {
 
       // 1. Detección automática de la fila de cabecera
       const lineaNormalizada = linea.toLowerCase();
-      if (!colIndices && (lineaNormalizada.includes('eptot') || lineaNormalizada.includes('thd') || lineaNormalizada.includes('hora'))) {
+      if (!colIndices && (lineaNormalizada.includes('eptot') || lineaNormalizada.includes('ptot') || lineaNormalizada.includes('thd') || lineaNormalizada.includes('hora'))) {
         colIndices = {
           time: 0,
+          // Energía por intervalo de 5 min (Wh)
           eptot: columnas.findIndex(c => c.toLowerCase().includes('eptot')),
+          // Potencia activa instantánea/promedio (W). Se excluye 'eptot' para no confundirlas.
+          ptot: columnas.findIndex(c => /ptot/i.test(c) && !/eptot/i.test(c)),
           cap: columnas.findIndex(c => c.toLowerCase().includes('ntotcap')),
           ind: columnas.findIndex(c => c.toLowerCase().includes('ntotind')),
 
@@ -80,8 +83,17 @@ export const importMetrel = async (req, res) => {
       const rawTime = columnas[colIndices.time]?.trim();
       if (!rawTime || !rawTime.includes('/') || !rawTime.includes(':')) continue;
 
-      // Lectura de potencias (con fallback a índices 1, 2, 3 si el nombre varió)
-      const rawWh = parseMetrelFloat(columnas[colIndices.eptot !== -1 ? colIndices.eptot : 1]);
+      // Lectura de potencia activa → kW
+      //  - Archivo con Eptot (Wh por intervalo de 5 min): kW = Wh * 12 / 1000
+      //  - Archivo con Ptot (W): kW = W / 1000
+      let kw;
+      if (colIndices.eptot !== -1) {
+        kw = (parseMetrelFloat(columnas[colIndices.eptot]) * 12) / 1000;
+      } else {
+        const idxPotencia = colIndices.ptot !== -1 ? colIndices.ptot : 1;
+        kw = parseMetrelFloat(columnas[idxPotencia]) / 1000;
+      }
+
       const rawVarCap = parseMetrelFloat(columnas[colIndices.cap !== -1 ? colIndices.cap : 2]);
       const rawVarInd = parseMetrelFloat(columnas[colIndices.ind !== -1 ? colIndices.ind : 3]);
 
@@ -115,12 +127,11 @@ export const importMetrel = async (req, res) => {
 
       const hora = String(horaInt).padStart(2, '0');
       const minuto = String(minutoRedondeado).padStart(2, '0');
-      const horaMinuto = `${hora}:${minuto}`; 
+      const horaMinuto = `${hora}:${minuto}`;
       const fecha = `${añoStr}-${mesStr.padStart(2, '0')}-${diaStr.padStart(2, '0')}`;
       const timestampNeutro = new Date(`${fecha}T${hora}:${minuto}:00.000Z`);
       const diaSemana = diasInEsp[timestampNeutro.getUTCDay()];
 
-      const kw = (rawWh * 12) / 1000;
       const kvarCap = rawVarCap / 1000;
       const kvarInd = rawVarInd / 1000;
 
@@ -181,9 +192,9 @@ export const chartData = async (req, res) => {
 
     const query = { boardId };
     if (fechaInicio && fechaFin) {
-      query.fecha = { $gte: fechaInicio,$lte: fechaFin };
+      query.fecha = { $gte: fechaInicio, $lte: fechaFin };
     } else {
-      query.fecha = { $gte: minFechaDisponible,$lte: maxFechaDisponible };
+      query.fecha = { $gte: minFechaDisponible, $lte: maxFechaDisponible };
     }
 
     const datos = await Measurement.find(query).sort({ timestamp: 1 });
