@@ -1,6 +1,7 @@
 import openai from "../config/openai.js";
 import Board from "../models/Board.js";
 import sharp from "sharp";
+import { pdf } from "pdf-to-img"; // npm i pdf-to-img
 
 const MODEL = process.env.OPENAI_BILL_MODEL || "gpt-4o";
 
@@ -51,6 +52,26 @@ const diffDays = (a, b) => {
   return days >= 20 && days <= 40 ? days : null;
 };
 const daysInMonth = (year, monthIdx) => new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate();
+
+// ── PDF -> PNG (página 1) ──
+// scale 3 ≈ 216 dpi. Si la tabla de historial sale borrosa, súbelo a 4.
+// Si el PNG pesa demasiado (más de 5-6 MB), bájalo a 2.5.
+const PDF_SCALE = Number(process.env.RECIBO_PDF_SCALE) || 3;
+
+const pdfAImagen = async (buffer) => {
+  const doc = await pdf(buffer, { scale: PDF_SCALE });
+
+  // pdf-to-img v4+: acceso directo a una página
+  if (typeof doc.getPage === "function") {
+    return Buffer.from(await doc.getPage(1));
+  }
+
+  // Versiones anteriores: iterable asíncrono, se toma la primera página
+  for await (const page of doc) {
+    return Buffer.from(page);
+  }
+  throw new Error("El PDF no tiene páginas");
+};
 
 // ── Llamada a visión (JSON estricto) ──
 const callVision = async (base64Data, prompt) => {
@@ -647,14 +668,30 @@ export const extractElectricityRates = async (req, res) => {
     const file = req.file;
 
     if (!file || !file.buffer) {
-      return res.status(400).json({ error: "Debes adjuntar una imagen del recibo de luz." });
+      return res.status(400).json({ error: "Debes adjuntar una imagen o un PDF del recibo de luz." });
     }
 
-    const mime = file.mimetype || "image/jpeg";
-    if (!mime.startsWith("image/")) {
+    let mime = file.mimetype || "image/jpeg";
+    const esPdf = mime === "application/pdf";
+
+    if (!esPdf && !mime.startsWith("image/")) {
       return res.status(400).json({
-        error: "Formato no compatible. Por favor sube una imagen (JPG, PNG o WEBP) de tu recibo de luz.",
+        error: "Formato no compatible. Sube una imagen (JPG, PNG o WEBP) o un PDF de tu recibo de luz.",
       });
+    }
+
+    // PDF -> PNG (página 1). Desde aquí todo el pipeline trabaja con una imagen.
+    if (esPdf) {
+      try {
+        file.buffer = await pdfAImagen(file.buffer);
+        mime = "image/png";
+        console.log(`[recibo] PDF convertido a PNG (${Math.round(file.buffer.length / 1024)} KB)`);
+      } catch (e) {
+        console.warn("[recibo] no se pudo convertir el PDF:", e.stack || e.message);
+        return res.status(422).json({
+          error: "No se pudo leer el PDF: " + e.message,
+        });
+      }
     }
 
     const base64Data = `data:${mime};base64,${file.buffer.toString("base64")}`;
@@ -666,6 +703,12 @@ export const extractElectricityRates = async (req, res) => {
     const tarifaFP = num(parsed.tarifaFP);
 
     if (!tarifaHP || !tarifaFP) {
+      console.warn(
+        "[recibo] sin tarifas. parsed =",
+        JSON.stringify(parsed),
+        "| PNG KB:",
+        Math.round(file.buffer.length / 1024)
+      );
       return res.status(422).json({
         error: "No se pudieron extraer los datos del recibo. Asegúrate de que los importes facturados sean legibles.",
       });
@@ -690,7 +733,7 @@ export const extractElectricityRates = async (req, res) => {
 
     if (kwhHPActual == null || kwhFPActual == null) {
       return res.status(422).json({
-        error: "No se pudieron leer los kWh del recibo. Sube una imagen más nítida.",
+        error: "No se pudieron leer los kWh del recibo. Sube una imagen o PDF más nítido.",
       });
     }
 
@@ -888,7 +931,7 @@ export const extractElectricityRates = async (req, res) => {
         hpArr = [kwhHPActual];
         warning =
           "No se pudo leer el historial de 12 meses del recibo (" + tabla.motivo + "). " +
-          "Se muestra solo el mes facturado; sube una imagen más nítida para ver el consumo anual real.";
+          "Se muestra solo el mes facturado; sube una imagen o PDF más nítido para ver el consumo anual real.";
       }
     }
 
@@ -1002,6 +1045,9 @@ export const extractElectricityRates = async (req, res) => {
     }
     if (!factorFactura) {
       agregarAviso("No se pudo leer el Total a pagar del recibo; el costo mostrado incluye solo energía activa.");
+    }
+    if (esPdf) {
+      agregarAviso("El recibo se procesó desde un PDF (solo la página 1).");
     }
 
     // ── Meta de ahorro de la empresa ──
