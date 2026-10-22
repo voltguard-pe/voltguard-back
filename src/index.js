@@ -22,6 +22,7 @@ import thermographyRoute from "./routes/thermography.route.js";
 import voltageEventRoute from "./routes/voltageEvent.route.js";
 import billRoute from "./routes/bill.route.js";
 import spatZipImportRoute from "./routes/spatZipImport.route.js";
+import solarThermographyRoute from './routes/solarThermography.route.js';
 
 dotenv.config();
 
@@ -83,6 +84,7 @@ app.use("/api/v1/thermography", thermographyRoute);
 app.use("/api/v1/voltage-events", voltageEventRoute);
 app.use("/api/v1/bill", billRoute);
 app.use("/api/v1/spat", spatZipImportRoute);
+app.use("/api/v1/solar-thermography", solarThermographyRoute);
 
 const PORT = process.env.PORT || 5080;
 
