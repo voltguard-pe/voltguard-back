@@ -1,4 +1,5 @@
 import zlib from "zlib";
+import AdmZip from "adm-zip";
 import cloudinary from "../config/cloudinary.js";
 import SolarThermography from "../models/SolarThermography.js";
 
@@ -21,15 +22,55 @@ export const uploadSolarPackage = async (req, res) => {
     const { companyCode, title, solarCode } = req.body;
     const files = req.files || {};
 
-    const csvFile = files["csvFile"]?.[0];
-    const thermalImageFile = files["thermalImage"]?.[0];
-    const visualImageFile = files["visualImage"]?.[0];
+    let csvFile = files["csvFile"]?.[0];
+    let thermalImageFile = files["thermalImage"]?.[0];
+    let visualImageFile = files["visualImage"]?.[0];
+    const zipFile = files["zipFile"]?.[0];
 
     if (!companyCode) {
       return res.status(400).json({ ok: false, success: false, error: "Debes enviar companyCode." });
     }
+
+    // SI EL USUARIO SUBIÓ UN ARCHIVO ZIP (MODO MASIVO ESTILO SPAT)
+    if (zipFile && zipFile.buffer) {
+      try {
+        const zip = new AdmZip(zipFile.buffer);
+        const zipEntries = zip.getEntries();
+
+        for (const entry of zipEntries) {
+          if (entry.isDirectory || entry.entryName.includes("__MACOSX") || entry.entryName.startsWith(".")) {
+            continue;
+          }
+
+          const fileName = entry.entryName.split("/").pop().toLowerCase();
+          const fileBuffer = entry.getData();
+
+          if (fileName.endsWith(".csv") && !csvFile) {
+            csvFile = { buffer: fileBuffer, originalname: fileName };
+          } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png")) {
+            const upperName = fileName.toUpperCase();
+            if (!thermalImageFile && (upperName.includes("_R") || upperName.includes("_T") || upperName.includes("THERM") || upperName.includes("TERM") || upperName.includes("IR"))) {
+              thermalImageFile = { buffer: fileBuffer, originalname: fileName };
+            } else if (!visualImageFile && (upperName.includes("_V") || upperName.includes("_W") || upperName.includes("VIS") || upperName.includes("RGB"))) {
+              visualImageFile = { buffer: fileBuffer, originalname: fileName };
+            } else {
+              // Asignación por descarte si los nombres son genéricos
+              if (!thermalImageFile) {
+                thermalImageFile = { buffer: fileBuffer, originalname: fileName };
+              } else if (!visualImageFile) {
+                visualImageFile = { buffer: fileBuffer, originalname: fileName };
+              }
+            }
+          }
+        }
+      } catch (zipErr) {
+        console.error("Error descomprimiendo ZIP en backend:", zipErr);
+        return res.status(400).json({ ok: false, success: false, error: "El archivo ZIP está corrupto o no es válido." });
+      }
+    }
+
     if (!csvFile || !csvFile.buffer) {
-      return res.status(400).json({ ok: false, success: false, error: "El archivo CSV de temperaturas es obligatorio." });
+      return res.status(400).json({ ok: false, success: false, error: "El archivo CSV de temperaturas es obligatorio (ya sea suelto o dentro del ZIP)." });
     }
 
     // 1. Asignar código de subarreglo (autoincrementable si viene vacío)
@@ -123,7 +164,6 @@ export const uploadSolarPackage = async (req, res) => {
           }
 
           if (isMax) {
-            // Marcar radio de influencia como visitado para evitar hotspots duplicados sobre la misma celda
             for (let dr = -5; dr <= 5; dr++) {
               for (let dc = -5; dc <= 5; dc++) {
                 const nr = r + dr, nc = c + dc;
@@ -233,7 +273,6 @@ export const getSolarDetails = async (req, res) => {
     const query = { companyPublicCode: companyCode };
     if (solarCode) query.solarCode = solarCode;
 
-    // Si no envían solarCode, trae el más reciente de esa empresa
     const record = await SolarThermography.findOne(query)
       .sort({ createdAt: -1 })
       .select("-compressedData")

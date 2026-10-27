@@ -15,6 +15,7 @@ router.post(
     { name: "csvFile", maxCount: 1 },
     { name: "thermalImage", maxCount: 1 },
     { name: "visualImage", maxCount: 1 },
+    { name: "zipFile", maxCount: 1 }, // 👈 Añadido para soportar también el archivo ZIP masivo
   ]),
   uploadSolarPackage
 );
