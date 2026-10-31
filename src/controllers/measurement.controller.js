@@ -1,9 +1,10 @@
 import Measurement from '../models/Measurement.js';
 import mongoose from "mongoose";
 
-const parseMetrelFloat = (textoRaw) => {
-  if (!textoRaw) return 0;
-  let limpio = String(textoRaw).replace(/[^\d.,-]/g, '');
+// Limpieza y parseo de floats (soporta tanto coma como punto decimal)
+const parseUniversalFloat = (textoRaw) => {
+  if (textoRaw === null || textoRaw === undefined) return 0;
+  let limpio = String(textoRaw).trim().replace(/[^\d.,-]/g, '');
   if (limpio.includes(',') && limpio.includes('.')) {
     limpio = limpio.replace(/,/g, '');
   } else if (limpio.includes(',') && !limpio.includes('.')) {
@@ -13,59 +14,108 @@ const parseMetrelFloat = (textoRaw) => {
   return isNaN(valor) ? 0 : valor;
 };
 
-// Función auxiliar: Detección universal de cabeceras THD (%)
-// Compatible con conexiones Delta (U12, U23, U31) y Estrella (U1, U2, U3)
+// Detección universal de THD Tensión (%) para Metrel, Circutor y Fluke
 const encontrarColumnaTHDU = (columnas, fase) => {
   return columnas.findIndex(col => {
     const c = col.toLowerCase();
-    // Exigir 'thd' y el símbolo '%' obligatoriamente para descartar las columnas en Voltios [V]
-    if (!c.includes('thd') || !c.includes('%')) return false;
+    const esTHD = c.includes('thd') || c.includes('distors');
+    const esVoltaje = c.includes('u') || c.includes('v') || c.includes('tensi');
+    const esPorc = c.includes('%');
+    if (!esTHD || !esVoltaje || !esPorc) return false;
 
     if (fase === 1) {
-      return c.includes('u12') || (c.includes('u1') && !c.includes('u12') && !c.includes('u31'));
+      return c.includes('u12') || c.includes('v12') || 
+             (c.includes('l1') && !c.includes('l12')) || 
+             (c.includes('u1') && !c.includes('u12') && !c.includes('u31')) ||
+             (c.includes('v1') && !c.includes('v12') && !c.includes('v31'));
     }
     if (fase === 2) {
-      return c.includes('u23') || (c.includes('u2') && !c.includes('u23'));
+      return c.includes('u23') || c.includes('v23') || 
+             (c.includes('l2') && !c.includes('l23')) || 
+             (c.includes('u2') && !c.includes('u23')) ||
+             (c.includes('v2') && !c.includes('v23'));
     }
     if (fase === 3) {
-      return c.includes('u31') || (c.includes('u3') && !c.includes('u31'));
+      return c.includes('u31') || c.includes('v31') || 
+             (c.includes('l3') && !c.includes('l31')) || 
+             (c.includes('u3') && !c.includes('u31')) ||
+             (c.includes('v3') && !c.includes('v31'));
     }
     return false;
   });
 };
 
-// A. IMPORTACIÓN CON LECTURA DINÁMICA DE CABECERAS
-export const importMetrel = async (req, res) => {
+export const importUniversalMeasurement = async (req, res) => {
   try {
     const { boardId } = req.params;
     if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'Buffer vacío.' });
 
-    const csvTexto = req.file.buffer.toString('utf-8');
+    // latin1 previene que caracteres especiales (ó, é, º, ï»¿) rompan la lectura de cabeceras
+    const csvTexto = req.file.buffer.toString('latin1');
     const lineas = csvTexto.split(/\r?\n/);
     const datosProcesados = [];
     const diasInEsp = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
     let colIndices = null;
+    let delim = ';';
+    let tieneColSeparadaHora = false;
 
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i].trim();
       if (!linea) continue;
 
-      const columnas = linea.replace(/"/g, '').split(';');
+      // Autodetectar delimitador (; o ,)
+      if (!colIndices) {
+        if ((linea.match(/;/g) || []).length < (linea.match(/,/g) || []).length) {
+          delim = ',';
+        }
+      }
 
-      // 1. Detección automática de la fila de cabecera
-      const lineaNormalizada = linea.toLowerCase();
-      if (!colIndices && (lineaNormalizada.includes('eptot') || lineaNormalizada.includes('ptot') || lineaNormalizada.includes('thd') || lineaNormalizada.includes('hora'))) {
+      const columnas = linea.replace(/"/g, '').split(delim);
+      const lineaNorm = linea.toLowerCase();
+
+      // Detección universal de la fila de cabecera
+      if (!colIndices && (
+        lineaNorm.includes('ptot') || 
+        lineaNorm.includes('p.activa') || 
+        lineaNorm.includes('active power') || 
+        lineaNorm.includes('fecha/hora') || 
+        lineaNorm.includes('hora [utc]') ||
+        (lineaNorm.includes('fecha') && lineaNorm.includes('hora'))
+      )) {
+        const idxFecha = columnas.findIndex(c => /^(fecha|date)$/i.test(c.trim()));
+        const idxHora = columnas.findIndex(c => /^(hora|time)$/i.test(c.trim()));
+
+        tieneColSeparadaHora = (idxFecha !== -1 && idxHora !== -1);
+
         colIndices = {
-          time: 0,
-          // Energía por intervalo de 5 min (Wh)
-          eptot: columnas.findIndex(c => c.toLowerCase().includes('eptot')),
-          // Potencia activa instantánea/promedio (W). Se excluye 'eptot' para no confundirlas.
-          ptot: columnas.findIndex(c => /ptot/i.test(c) && !/eptot/i.test(c)),
-          cap: columnas.findIndex(c => c.toLowerCase().includes('ntotcap')),
-          ind: columnas.findIndex(c => c.toLowerCase().includes('ntotind')),
+          dateCol: tieneColSeparadaHora ? idxFecha : 0,
+          timeCol: tieneColSeparadaHora ? idxHora : 0,
 
-          // Armónicos de Tensión (%) - Detección universal U1/U12, U2/U23, U3/U31
+          // Energía acumulada por intervalo (Wh / kWh)
+          eptot: columnas.findIndex(c => c.toLowerCase().includes('eptot')),
+
+          // Potencia Activa Total trifásica (excluyendo columnas de energía pura)
+          ptot: columnas.findIndex(c => 
+            (/ptot/i.test(c) || /p\.activa/i.test(c) || /active.*power/i.test(c) || /potencia.*activa/i.test(c)) && 
+            !/eptot/i.test(c) && !/e\.activa/i.test(c)
+          ),
+
+          // Reactiva Capacitiva
+          cap: columnas.findIndex(c => 
+            c.toLowerCase().includes('ntotcap') || 
+            c.toLowerCase().includes('capacit') || 
+            c.toLowerCase().includes('kvarc')
+          ),
+
+          // Reactiva Inductiva
+          ind: columnas.findIndex(c => 
+            c.toLowerCase().includes('ntotind') || 
+            c.toLowerCase().includes('induct') || 
+            c.toLowerCase().includes('kvarl')
+          ),
+
+          // Armónicos de Tensión (%)
           thdu1: encontrarColumnaTHDU(columnas, 1),
           thdu2: encontrarColumnaTHDU(columnas, 2),
           thdu3: encontrarColumnaTHDU(columnas, 3),
@@ -74,47 +124,55 @@ export const importMetrel = async (req, res) => {
           thdi1: columnas.findIndex(c => /thd.*i.*1/i.test(c) && c.includes('%')),
           thdi2: columnas.findIndex(c => /thd.*i.*2/i.test(c) && c.includes('%')),
           thdi3: columnas.findIndex(c => /thd.*i.*3/i.test(c) && c.includes('%')),
+
+          // Banderas automáticas de unidades
+          ptotIsKw: false,
+          reactIsKvar: false
         };
+
+        // Si la cabecera dice kW explicitamente, NO dividimos entre 1000
+        if (colIndices.ptot !== -1) {
+          colIndices.ptotIsKw = columnas[colIndices.ptot].toLowerCase().includes('kw');
+        }
+        // Si las reactivas dicen kvar / kvarc / kvarl, tampoco dividimos
+        if (colIndices.cap !== -1 || colIndices.ind !== -1) {
+          const hc = colIndices.cap !== -1 ? columnas[colIndices.cap].toLowerCase() : '';
+          const hi = colIndices.ind !== -1 ? columnas[colIndices.ind].toLowerCase() : '';
+          colIndices.reactIsKvar = hc.includes('kvar') || hi.includes('kvar');
+        }
+
         continue;
       }
 
-      if (!colIndices) continue; // Saltar filas previas a la cabecera
+      if (!colIndices) continue; // Saltar filas de metadatos o comentarios
 
-      const rawTime = columnas[colIndices.time]?.trim();
-      if (!rawTime || !rawTime.includes('/') || !rawTime.includes(':')) continue;
+      // Extracción de Fecha y Hora
+      let rawFechaStr = '';
+      let rawHoraStr = '';
 
-      // Lectura de potencia activa → kW
-      //  - Archivo con Eptot (Wh por intervalo de 5 min): kW = Wh * 12 / 1000
-      //  - Archivo con Ptot (W): kW = W / 1000
-      let kw;
-      if (colIndices.eptot !== -1) {
-        kw = (parseMetrelFloat(columnas[colIndices.eptot]) * 12) / 1000;
+      if (tieneColSeparadaHora) {
+        rawFechaStr = columnas[colIndices.dateCol]?.trim();
+        rawHoraStr = columnas[colIndices.timeCol]?.trim();
       } else {
-        const idxPotencia = colIndices.ptot !== -1 ? colIndices.ptot : 1;
-        kw = parseMetrelFloat(columnas[idxPotencia]) / 1000;
+        const fullTime = columnas[colIndices.dateCol]?.trim();
+        if (!fullTime) continue;
+        const partes = fullTime.split(' ');
+        rawFechaStr = partes[0] || '';
+        rawHoraStr = partes[1] || '';
       }
 
-      const rawVarCap = parseMetrelFloat(columnas[colIndices.cap !== -1 ? colIndices.cap : 2]);
-      const rawVarInd = parseMetrelFloat(columnas[colIndices.ind !== -1 ? colIndices.ind : 3]);
+      if (!rawFechaStr || !rawHoraStr || !rawFechaStr.includes('/') || !rawHoraStr.includes(':')) {
+        continue;
+      }
 
-      // Lectura individual de Armónicos de Tensión (%)
-      const u1 = colIndices.thdu1 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu1]) : 0;
-      const u2 = colIndices.thdu2 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu2]) : 0;
-      const u3 = colIndices.thdu3 !== -1 ? parseMetrelFloat(columnas[colIndices.thdu3]) : 0;
-      const cantU = (u1 > 0 ? 1 : 0) + (u2 > 0 ? 1 : 0) + (u3 > 0 ? 1 : 0);
-      const thdVAvg = cantU > 0 ? (u1 + u2 + u3) / cantU : 0;
+      // Normalizar Año de 2 dígitos a 4 dígitos (ej: "10" -> "2010")
+      const [diaStr, mesStr, añoStrRaw] = rawFechaStr.split('/');
+      let añoStr = añoStrRaw;
+      if (añoStr && añoStr.length === 2) {
+        añoStr = parseInt(añoStr) > 70 ? `19${añoStr}` : `20${añoStr}`;
+      }
 
-      // Lectura individual de Armónicos de Corriente (%)
-      const i1 = colIndices.thdi1 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi1]) : 0;
-      const i2 = colIndices.thdi2 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi2]) : 0;
-      const i3 = colIndices.thdi3 !== -1 ? parseMetrelFloat(columnas[colIndices.thdi3]) : 0;
-      const cantI = (i1 > 0 ? 1 : 0) + (i2 > 0 ? 1 : 0) + (i3 > 0 ? 1 : 0);
-      const thdIAvg = cantI > 0 ? (i1 + i2 + i3) / cantI : 0;
-
-      const [fechaParte, horaParte] = rawTime.split(' ');
-      const [diaStr, mesStr, añoStr] = fechaParte.split('/');
-      const [horaStr, minutoStr] = horaParte.split(':');
-
+      const [horaStr, minutoStr] = rawHoraStr.split(':');
       let horaInt = parseInt(horaStr);
       let minutoInt = parseInt(minutoStr);
       let minutoRedondeado = Math.round(minutoInt / 5) * 5;
@@ -132,8 +190,35 @@ export const importMetrel = async (req, res) => {
       const timestampNeutro = new Date(`${fecha}T${hora}:${minuto}:00.000Z`);
       const diaSemana = diasInEsp[timestampNeutro.getUTCDay()];
 
-      const kvarCap = rawVarCap / 1000;
-      const kvarInd = rawVarInd / 1000;
+      // Conversión inteligente de Potencia Activa (siempre a kW)
+      let kw = 0;
+      if (colIndices.eptot !== -1) {
+        // En Metrel Wh a kW por intervalo
+        kw = (parseUniversalFloat(columnas[colIndices.eptot]) * 12) / 1000;
+      } else if (colIndices.ptot !== -1) {
+        const rawP = parseUniversalFloat(columnas[colIndices.ptot]);
+        kw = colIndices.ptotIsKw ? rawP : rawP / 1000;
+      }
+
+      // Conversión inteligente de Potencia Reactiva (siempre a kvar)
+      const rawCap = colIndices.cap !== -1 ? parseUniversalFloat(columnas[colIndices.cap]) : 0;
+      const rawInd = colIndices.ind !== -1 ? parseUniversalFloat(columnas[colIndices.ind]) : 0;
+      const kvarCap = colIndices.reactIsKvar ? rawCap : rawCap / 1000;
+      const kvarInd = colIndices.reactIsKvar ? rawInd : rawInd / 1000;
+
+      // THD de Tensión (%)
+      const u1 = colIndices.thdu1 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu1]) : 0;
+      const u2 = colIndices.thdu2 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu2]) : 0;
+      const u3 = colIndices.thdu3 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu3]) : 0;
+      const cantU = (u1 > 0 ? 1 : 0) + (u2 > 0 ? 1 : 0) + (u3 > 0 ? 1 : 0);
+      const thdVAvg = cantU > 0 ? (u1 + u2 + u3) / cantU : 0;
+
+      // THD de Corriente (%)
+      const i1 = colIndices.thdi1 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi1]) : 0;
+      const i2 = colIndices.thdi2 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi2]) : 0;
+      const i3 = colIndices.thdi3 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi3]) : 0;
+      const cantI = (i1 > 0 ? 1 : 0) + (i2 > 0 ? 1 : 0) + (i3 > 0 ? 1 : 0);
+      const thdIAvg = cantI > 0 ? (i1 + i2 + i3) / cantI : 0;
 
       datosProcesados.push({
         boardId,
@@ -144,12 +229,10 @@ export const importMetrel = async (req, res) => {
         demandaKw: Number(kw.toFixed(2)),
         reactivaCapKvar: Number(kvarCap.toFixed(2)),
         reactivaIndKvar: Number(kvarInd.toFixed(2)),
-        // Guardado de cada fase individual de Tensión
         thd_u12: Number(u1.toFixed(2)),
         thd_u23: Number(u2.toFixed(2)),
         thd_u31: Number(u3.toFixed(2)),
         thdVoltaje: Number(thdVAvg.toFixed(2)),
-        // Guardado de cada fase individual de Corriente
         thd_i1: Number(i1.toFixed(2)),
         thd_i2: Number(i2.toFixed(2)),
         thd_i3: Number(i3.toFixed(2)),
