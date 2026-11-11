@@ -1,9 +1,17 @@
-import express from "express";
-import { subscription } from "../controllers/subscription.controller.js"
-import { authMiddleware } from "../middlewares/auth.middleware.js";
+import { Router } from 'express';
+import {
+  getSalesDashboardData,
+  activateOrRenewSubscription,
+  getSubscriptionDetail,
+} from '../controllers/subscription.controller.js';
+// Importa tus middlewares de autenticación habituales
+// import { requireAuth, requireSuperAdmin } from '../middlewares/auth.middleware.js';
 
-const router = express.Router()
+const router = Router();
 
-router.put("/", authMiddleware, subscription);
+// Rutas protegidas para SuperAdmin / Asesora de Ventas
+router.get('/', getSalesDashboardData);
+router.get('/:companyId/subscription', getSubscriptionDetail);
+router.post('/:companyId/activate', activateOrRenewSubscription);
 
 export default router;
