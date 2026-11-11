@@ -1,6 +1,7 @@
 import Measurement from '../models/Measurement.js';
 import mongoose from "mongoose";
 
+// Limpieza y parseo de floats (soporta tanto coma como punto decimal)
 const parseUniversalFloat = (textoRaw) => {
   if (textoRaw === null || textoRaw === undefined) return 0;
   let limpio = String(textoRaw).trim().replace(/[^\d.,-]/g, '');
@@ -13,6 +14,7 @@ const parseUniversalFloat = (textoRaw) => {
   return isNaN(valor) ? 0 : valor;
 };
 
+// Detección universal de THD Tensión (%) para Metrel, Circutor y Fluke
 const encontrarColumnaTHDU = (columnas, fase) => {
   return columnas.findIndex(col => {
     const c = col.toLowerCase();
@@ -47,6 +49,7 @@ export const importUniversalMeasurement = async (req, res) => {
     const { boardId } = req.params;
     if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'Buffer vacío.' });
 
+    // latin1 previene que caracteres especiales (ó, é, º, ï»¿) rompan la lectura de cabeceras
     const csvTexto = req.file.buffer.toString('latin1');
     const lineas = csvTexto.split(/\r?\n/);
     const datosProcesados = [];
@@ -60,6 +63,7 @@ export const importUniversalMeasurement = async (req, res) => {
       const linea = lineas[i].trim();
       if (!linea) continue;
 
+      // Autodetectar delimitador (; o ,)
       if (!colIndices) {
         if ((linea.match(/;/g) || []).length > (linea.match(/,/g) || []).length) {
           delim = ';';
@@ -69,7 +73,7 @@ export const importUniversalMeasurement = async (req, res) => {
       const columnas = linea.replace(/"/g, '').split(delim);
       const lineaNorm = linea.toLowerCase();
 
-      // Detección flexible adaptada a Circutor y Metrel
+      // Detección universal de la fila de cabecera
       if (!colIndices && (
         lineaNorm.includes('fecha') || 
         lineaNorm.includes('date') || 
@@ -86,24 +90,34 @@ export const importUniversalMeasurement = async (req, res) => {
 
         colIndices = {
           dateCol: idxFecha !== -1 ? idxFecha : 0,
-          timeCol: tieneColSeparadaHora ? idxHora : 1, // Si no hay columna separada, asume la col 1 para la hora
+          timeCol: tieneColSeparadaHora ? idxHora : 1,
 
+          // Energía acumulada por intervalo (Wh / kWh)
           eptot: columnas.findIndex(c => c.toLowerCase().includes('eptot')),
+
+          // Potencia Activa Total trifásica
           ptot: columnas.findIndex(c => 
             (/ptot/i.test(c) || /p\.\s*activa/i.test(c) || /active.*power/i.test(c) || /potencia.*activa/i.test(c)) && 
             !/eptot/i.test(c) && !/e\.activa/i.test(c)
           ),
-          cap: columnas.findIndex(c => c.toLowerCase().includes('capacit') || c.toLowerCase().includes('kvarc')),
-          ind: columnas.findIndex(c => c.toLowerCase().includes('induct') || c.toLowerCase().includes('kvarl')),
 
+          // Reactiva Capacitiva
+          cap: columnas.findIndex(c => c.toLowerCase().includes('capacit') || c.toLowerCase().includes('kvarc') || c.toLowerCase().includes('ntotcap')),
+
+          // Reactiva Inductiva
+          ind: columnas.findIndex(c => c.toLowerCase().includes('induct') || c.toLowerCase().includes('kvarl') || c.toLowerCase().includes('ntotind')),
+
+          // Armónicos de Tensión (%)
           thdu1: encontrarColumnaTHDU(columnas, 1),
           thdu2: encontrarColumnaTHDU(columnas, 2),
           thdu3: encontrarColumnaTHDU(columnas, 3),
 
+          // Armónicos de Corriente (%)
           thdi1: columnas.findIndex(c => /distors.*i.*l1|thd.*i.*1/i.test(c)),
           thdi2: columnas.findIndex(c => /distors.*i.*l2|thd.*i.*2/i.test(c)),
           thdi3: columnas.findIndex(c => /distors.*i.*l3|thd.*i.*3/i.test(c)),
 
+          // Banderas automáticas de unidades
           ptotIsKw: false,
           reactIsKvar: false
         };
@@ -111,11 +125,18 @@ export const importUniversalMeasurement = async (req, res) => {
         if (colIndices.ptot !== -1) {
           colIndices.ptotIsKw = columnas[colIndices.ptot].toLowerCase().includes('kw');
         }
+        if (colIndices.cap !== -1 || colIndices.ind !== -1) {
+          const hc = colIndices.cap !== -1 ? columnas[colIndices.cap].toLowerCase() : '';
+          const hi = colIndices.ind !== -1 ? columnas[colIndices.ind].toLowerCase() : '';
+          colIndices.reactIsKvar = hc.includes('kvar') || hi.includes('kvar');
+        }
+
         continue;
       }
 
-      if (!colIndices) continue;
+      if (!colIndices) continue; // Saltar filas de metadatos o comentarios
 
+      // Extracción de Fecha y Hora
       let rawFechaStr = '';
       let rawHoraStr = '';
 
@@ -134,6 +155,7 @@ export const importUniversalMeasurement = async (req, res) => {
         continue;
       }
 
+      // Normalizar Año de 2 dígitos a 4 dígitos
       const [diaStr, mesStr, añoStrRaw] = rawFechaStr.split('/');
       let añoStr = añoStrRaw;
       if (añoStr && añoStr.length === 2) {
@@ -158,6 +180,7 @@ export const importUniversalMeasurement = async (req, res) => {
       const timestampNeutro = new Date(`${fecha}T${hora}:${minuto}:00.000Z`);
       const diaSemana = diasInEsp[timestampNeutro.getUTCDay()];
 
+      // Conversión inteligente de Potencia Activa (siempre a kW)
       let kw = 0;
       if (colIndices.eptot !== -1) {
         kw = (parseUniversalFloat(columnas[colIndices.eptot]) * 12) / 1000;
@@ -166,17 +189,24 @@ export const importUniversalMeasurement = async (req, res) => {
         kw = colIndices.ptotIsKw ? rawP : rawP / 1000;
       }
 
-      const rawCap = colIndices.cap !== -1 ? parseUniversalFloat(columnas[colIndices.cap]) : 0;
-      const rawInd = colIndices.ind !== -1 ? parseUniversalFloat(columnas[colIndices.ind]) : 0;
-      const kvarCap = rawCap / 1000;
-      const kvarInd = rawInd / 1000;
+      // Detección precisa de columnas Reactivas para Circutor y Metrel
+      const idxCap = columnas.findIndex(c => /p\.\s*capacitiva.*trif/i.test(c) || c.toLowerCase().includes('ntotcap') || c.toLowerCase().includes('kvarc'));
+      const idxInd = columnas.findIndex(c => /p\.\s*inductiva.*trif/i.test(c) || c.toLowerCase().includes('ntotind') || c.toLowerCase().includes('kvarl'));
 
+      const rawCap = idxCap !== -1 ? parseUniversalFloat(columnas[idxCap]) : (colIndices.cap !== -1 ? parseUniversalFloat(columnas[colIndices.cap]) : 0);
+      const rawInd = idxInd !== -1 ? parseUniversalFloat(columnas[idxInd]) : (colIndices.ind !== -1 ? parseUniversalFloat(columnas[colIndices.ind]) : 0);
+
+      const kvarCap = colIndices.reactIsKvar ? rawCap : (rawCap > 100 ? rawCap / 1000 : rawCap);
+      const kvarInd = colIndices.reactIsKvar ? rawInd : (rawInd > 100 ? rawInd / 1000 : rawInd);
+
+      // THD de Tensión (%)
       const u1 = colIndices.thdu1 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu1]) : 0;
       const u2 = colIndices.thdu2 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu2]) : 0;
       const u3 = colIndices.thdu3 !== -1 ? parseUniversalFloat(columnas[colIndices.thdu3]) : 0;
       const cantU = (u1 > 0 ? 1 : 0) + (u2 > 0 ? 1 : 0) + (u3 > 0 ? 1 : 0);
       const thdVAvg = cantU > 0 ? (u1 + u2 + u3) / cantU : 0;
 
+      // THD de Corriente (%)
       const i1 = colIndices.thdi1 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi1]) : 0;
       const i2 = colIndices.thdi2 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi2]) : 0;
       const i3 = colIndices.thdi3 !== -1 ? parseUniversalFloat(columnas[colIndices.thdi3]) : 0;
@@ -294,12 +324,10 @@ export const chartData = async (req, res) => {
           p: item.demandaKw,
           ind: item.reactivaIndKvar,
           cap: item.reactivaCapKvar,
-          // Fases individuales THD-U (%) enviadas al frontend
           thd_u12: item.thd_u12 || 0,
           thd_u23: item.thd_u23 || 0,
           thd_u31: item.thd_u31 || 0,
           thd_v: item.thdVoltaje || 0,
-          // Fases individuales THD-I (%) enviadas al frontend
           thd_i1: item.thd_i1 || 0,
           thd_i2: item.thd_i2 || 0,
           thd_i3: item.thd_i3 || 0,
