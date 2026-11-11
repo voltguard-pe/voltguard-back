@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import dotenv from "dotenv";
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import authRoute from "./routes/auth.route.js";
 import companyRoute from "./routes/company.route.js";
 import boardRoute from "./routes/board.route.js";
@@ -20,11 +22,14 @@ import measurementRoute from "./routes/measurement.route.js";
 import importUnifilarNFPARoute from "./routes/importUnifilarNFPA.route.js";
 import thermographyRoute from "./routes/thermography.route.js";
 import voltageEventRoute from "./routes/voltageEvent.route.js";
-import billRoute from "./routes/bill.route.js";
+import billComparisons, { UPLOAD_DIR } from "./routes/Billcomparisons.js";
 import spatZipImportRoute from "./routes/spatZipImport.route.js";
 import solarThermographyRoute from './routes/solarThermography.route.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -33,22 +38,9 @@ connectDB();
 app.use(express.json());
 app.use(cookieParser());
 
-// const allowlist = [process.env.FRONTEND_URL];
-
-// const corsOptions = {
-//     origin: function (origin, callback) {
-//         if (allowlist.indexOf(origin) !== -1 || !origin) {
-//             callback(null, true);
-//         } else {
-//             callback(new Error("Not allowed by CORS"));
-//         }
-//     },
-//     credentials: true
-// };
-
-// app.use(cors(corsOptions));
-
-const allowlist = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim().replace(/\/$/, "")) : [];
+const allowlist = process.env.FRONTEND_URL
+    ? process.env.FRONTEND_URL.split(',').map(url => url.trim().replace(/\/$/, ""))
+    : [];
 
 const corsOptions = {
     origin: function (origin, callback) {
@@ -64,8 +56,19 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// app.options('(.*)', cors(corsOptions))
 
+// Servir los PDFs subidos para que "Ver los dos PDF" cargue en el <iframe> sin bloqueos
+app.use(
+  "/uploads/bills",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.removeHeader("X-Frame-Options");
+    next();
+  },
+  express.static(UPLOAD_DIR)
+);
+app.use("/api/v1/bill/comparisons", billComparisons);
 app.use("/api/v1/auth", authRoute);
 app.use("/api/v1/company", companyRoute);
 app.use("/api/v1/board", boardRoute);
@@ -82,7 +85,6 @@ app.use("/api/v1/mediciones", measurementRoute);
 app.use("/api/v1/import-unifilar-nfpa", importUnifilarNFPARoute);
 app.use("/api/v1/thermography", thermographyRoute);
 app.use("/api/v1/voltage-events", voltageEventRoute);
-app.use("/api/v1/bill", billRoute);
 app.use("/api/v1/spat", spatZipImportRoute);
 app.use("/api/v1/solar-thermography", solarThermographyRoute);
 
