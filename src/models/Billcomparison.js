@@ -1,6 +1,14 @@
 import mongoose from "mongoose";
 
-const FileSchema = new mongoose.Schema({ name: String, file: String }, { _id: false });
+const FileSchema = new mongoose.Schema(
+  {
+    name: String,
+    url: String, // URL de Cloudinary
+    publicId: String, // para poder borrarlo/reemplazarlo en Cloudinary
+    file: String, // legacy: recibos antiguos guardados en disco
+  },
+  { _id: false }
+);
 
 const schema = new mongoose.Schema(
   {
