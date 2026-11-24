@@ -12,6 +12,7 @@ import publicRoute from "./routes/public.route.js";
 import importRoute from "./routes/import.route.js";
 import connectDB from "./config/db.js";
 import cors from "cors";
+import reportRoute from "./routes/Report.routes.js";
 import cookieParser from "cookie-parser";
 import insulationRoute from "./routes/insulation.route.js";
 import nfpa70eRoute from "./routes/nfpa70e.route.js";
@@ -68,6 +69,7 @@ app.use(
   },
   express.static(UPLOAD_DIR)
 );
+app.use("/api/v1/reports", reportRoute);
 app.use("/api/v1/bill/comparisons", billComparisons);
 app.use("/api/v1/auth", authRoute);
 app.use("/api/v1/company", companyRoute);
